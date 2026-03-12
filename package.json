@@ -1,0 +1,9 @@
+{
+  "name": "wdk-hackathon",
+  "private": true,
+  "scripts": {
+    "test": "pnpm -r test",
+    "lint": "pnpm -r lint",
+    "build": "pnpm -r build"
+  }
+}
