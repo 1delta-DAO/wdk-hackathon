@@ -4,7 +4,7 @@ import { dirname, join } from 'path'
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
 export const ONEDELTA_MCP_URL = 'https://mcp-prototype.1delta.io/mcp'
-export const WDK_SERVER_PATH = join(__dirname, '../../../filler/wdk-mcp-toolkit/examples/basic/index.js')
+export const WDK_SERVER_PATH = join(__dirname, '../../wdk-mcp-toolkit/examples/basic/index.js')
 
 export const TOKEN: string = process.env.TOKEN ?? 'USDT'
 export const AMOUNT: string = process.env.AMOUNT ?? '1'
