@@ -29,8 +29,8 @@ describe.skipIf(!canRun)(
     beforeAll(async () => {
       // Force DRY_RUN so the agent never calls sendTransaction
       process.env.DRY_RUN = 'true'
-      process.env.TOKEN = 'USDC'
-      process.env.AMOUNT = '10'
+      process.env.TOKEN = 'USDT'
+      process.env.AMOUNT = '1'
       process.env.CHAIN_FILTER = '42161' // Arbitrum only — fewer market fetches
       process.env.MODEL ??= 'claude-haiku-4-5' // use fast/cheap model unless overridden
 
