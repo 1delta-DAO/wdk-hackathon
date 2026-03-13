@@ -8,7 +8,7 @@ importers:
 
   .: {}
 
-  filler/contracts:
+  packages/contracts:
     devDependencies:
       '@nomicfoundation/hardhat-foundry':
         specifier: ^1.1.3
@@ -23,7 +23,7 @@ importers:
         specifier: ^5.0.0
         version: 5.2.0(typescript@5.8.3)
 
-  filler/wdk-mcp-toolkit:
+  packages/wdk-mcp-toolkit:
     dependencies:
       '@inquirer/prompts':
         specifier: ^7.0.0
