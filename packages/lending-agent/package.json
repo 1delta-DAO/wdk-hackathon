@@ -1,0 +1,24 @@
+{
+  "name": "@wdk-hackathon/lending-agent",
+  "version": "1.0.0",
+  "description": "AI agent that finds the best lending market via 1delta MCP and executes deposits via WDK MCP",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsc && node --env-file=.env dist/index.js",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.78.0",
+    "@modelcontextprotocol/sdk": "^1.23.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "dotenv": "^17.3.1",
+    "typescript": "^5.3.3",
+    "vitest": "^2.0.0"
+  }
+}
