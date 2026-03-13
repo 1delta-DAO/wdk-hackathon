@@ -1,11 +1,9 @@
 import { DRY_RUN } from './config.js'
 
-export function buildSystemPrompt (walletAddress: string, docs: string = ''): string {
+export function buildSystemPrompt (walletAddress: string): string {
   const dryRunNote = DRY_RUN
     ? '\nDRY RUN MODE: Do NOT call sendTransaction or any write tools. Only fetch data and print the calldata you would send.'
     : ''
-
-  const docsSection = docs ? `\n\n---\n\n## 1delta MCP Reference\n\n${docs}` : ''
 
   return `You are an AI lending agent. Your goal is to find the best lending market for a given token and execute a deposit.
 
@@ -31,5 +29,5 @@ RULES:
 - get_deposit_calldata uses "operator" (not "onBehalfOf") for the wallet address.
 - get_lending_markets requires "chainId" (string). Use "count" to limit results.
 - The user's wallet address is: ${walletAddress || 'UNKNOWN — call getAddress(blockchain="ethereum") first'}
-- Be concise in your final report.${dryRunNote}${docsSection}`
+- Be concise in your final report.${dryRunNote}`
 }

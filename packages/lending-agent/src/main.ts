@@ -1,6 +1,6 @@
 import type Anthropic from '@anthropic-ai/sdk'
 import { TOKEN, AMOUNT, CHAIN_FILTER, DRY_RUN } from './config.js'
-import { connectOneDelta, connectWdk, callTool, toAnthropicTools, createRouter, loadDocs } from './mcp.js'
+import { connectOneDelta, connectWdk, callTool, toAnthropicTools, createRouter } from './mcp.js'
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { buildSystemPrompt } from './prompt.js'
 import { runAgentLoop } from './agent.js'
@@ -13,10 +13,9 @@ export interface AgentClients {
 export async function runAgent (clients: AgentClients): Promise<string> {
   const { oneDeltaClient, wdkClient } = clients
 
-  const [{ tools: oneDeltaTools }, { tools: wdkTools }, docs] = await Promise.all([
+  const [{ tools: oneDeltaTools }, { tools: wdkTools }] = await Promise.all([
     oneDeltaClient.listTools(),
     wdkClient.listTools(),
-    loadDocs(oneDeltaClient)
   ])
 
   console.log(`\n1delta tools (${oneDeltaTools.length}): ${oneDeltaTools.map(t => t.name).join(', ')}`)
@@ -40,7 +39,7 @@ export async function runAgent (clients: AgentClients): Promise<string> {
     console.warn('Could not fetch wallet address from WDK:', err instanceof Error ? err.message : err)
   }
 
-  const systemPrompt = buildSystemPrompt(walletAddress, docs)
+  const systemPrompt = buildSystemPrompt(walletAddress)
   const chainNote = CHAIN_FILTER ? ` on chain ${CHAIN_FILTER}` : ' across all supported chains'
   const userMessage = `Find the best ${TOKEN} lending market${chainNote} and deposit ${AMOUNT} USD worth of ${TOKEN} using my wallet.`
 
