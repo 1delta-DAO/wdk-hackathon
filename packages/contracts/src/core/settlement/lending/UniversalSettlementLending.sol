@@ -8,7 +8,7 @@ import {CompoundV2SettlementLending} from "./CompoundV2SettlementLending.sol";
 import {MorphoSettlementLending} from "./MorphoSettlementLending.sol";
 import {SiloV2SettlementLending} from "./SiloV2SettlementLending.sol";
 import {LenderIds, LenderOps} from "./DeltaEnums.sol";
-import {DeltaErrors} from "../errors/Errors.sol";
+import {DeltaErrors} from "../../errors/Errors.sol";
 
 // solhint-disable max-line-length
 
@@ -45,6 +45,7 @@ abstract contract UniversalSettlementLending is
         bytes memory data
     )
         internal
+        virtual
     {
         /**
          * Deposit collateral

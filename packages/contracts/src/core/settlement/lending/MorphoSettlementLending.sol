@@ -2,8 +2,8 @@
 
 pragma solidity 0.8.34;
 
-import {ERC20Selectors} from "../selectors/ERC20Selectors.sol";
-import {Masks} from "../masks/Masks.sol";
+import {ERC20Selectors} from "../../selectors/ERC20Selectors.sol";
+import {Masks} from "../../masks/Masks.sol";
 
 /**
  * @notice Settlement lending contract wrapping Morpho Blue with bytes memory for lender params.
