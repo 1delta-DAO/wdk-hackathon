@@ -6,88 +6,31 @@ import {UniversalSettlementLending} from "./lending/UniversalSettlementLending.s
 
 /**
  * @title SettlementExecutor
- * @notice Orchestrates three-phase lending settlements with merkle-verified actions
- *         and per-asset zero-sum accounting.
+ * @notice Orchestrates three-phase lending settlements with merkle-verified actions,
+ *         per-asset zero-sum accounting, and a percentage-based solver fee that
+ *         can only be charged on borrowed assets.
  *
  * ═══════════════════════════════════════════════════════════════════════════════
- *  OVERVIEW
+ *  SOLVER FEE — BORROW-ONLY, PERCENTAGE-BASED
  * ═══════════════════════════════════════════════════════════════════════════════
  *
- *  A settlement executes four stages in sequence:
+ *  The user signs `maxFeeBps` — the maximum fee as a fraction of the total
+ *  amount borrowed.  Denominator is 1e7 (sub-basis-point precision):
  *
- *      1. PRE-ACTIONS   — Merkle-verified lending ops (withdraw, repay, …)
- *      2. INTENT        — Optional asset conversion (e.g. DEX swap)
- *      3. POST-ACTIONS  — Merkle-verified lending ops (deposit, borrow, …)
- *      4. VALIDATION    — Assert every per-asset delta is zero
+ *      100% = 1e7    |  1 bps = 1 000    |  0.01 bps = 10
  *
- *  The invariant enforced by stage 4 guarantees that every token the contract
- *  receives during the settlement is fully consumed — nothing is left behind
- *  and nothing is created from thin air.
+ *  After all three phases the executor checks each asset's delta:
  *
- * ═══════════════════════════════════════════════════════════════════════════════
- *  ZERO-SUM DELTA ACCOUNTING
- * ═══════════════════════════════════════════════════════════════════════════════
+ *    • delta > 0, totalBorrowed > 0 → borrow surplus = fee
+ *        Verified: surplus × 1e7 ≤ totalBorrowed × maxFeeBps
+ *        Transferred to feeRecipient.
+ *    • delta > 0, totalBorrowed == 0 → non-borrow surplus → revert
+ *    • delta < 0 → deficit → revert
+ *    • delta == 0 → balanced → ok
  *
- *  Each lending operation returns three values:
- *
- *      (address assetUsed, uint256 amountIn, uint256 amountOut)
- *
- *    • assetUsed  — the ERC-20 address the operation actually touched
- *    • amountIn   — tokens the contract sent to the protocol  (deposit / repay)
- *    • amountOut  — tokens the contract received from the protocol (withdraw / borrow)
- *
- *  The executor maintains a compact array of AssetDelta structs.
- *  After each operation the corresponding entry is updated:
- *
- *      delta[assetUsed] += int256(amountOut) − int256(amountIn)
- *
- *  The intent phase (stage 2) may further modify deltas when it converts one
- *  asset into another — it subtracts the input amount and adds the output
- *  amount, potentially introducing a new asset entry.
- *
- *  Asset identification is SELF-VERIFYING: deltas use the `assetUsed` address
- *  returned by the lending router, not the `asset` field the solver declared
- *  in the execution blob.  A dishonest solver cannot mis-label an asset to
- *  break accounting because the lending operation itself determines what token
- *  was moved.
- *
- *  Example — cross-asset migration with a swap:
- *
- *    ┌─────────────────────────┬──────────────┬──────────────┐
- *    │ Stage                   │ WETH delta   │ USDC delta   │
- *    ├─────────────────────────┼──────────────┼──────────────┤
- *    │ Pre:  withdraw 100 WETH │ +100         │              │
- *    │ Pre:  repay 5 000 USDC  │              │ −5 000       │
- *    │ Intent: swap WETH→USDC  │ −100         │ +5 000       │
- *    │ Post: deposit 100 WETH  │  — (net 0)   │              │
- *    │ Post: borrow 5 000 USDC │              │  — (net 0)   │
- *    ├─────────────────────────┼──────────────┼──────────────┤
- *    │ Net                     │ 0 ✓          │ 0 ✓          │
- *    └─────────────────────────┴──────────────┴──────────────┘
- *
- *  If the intent is empty (no conversion), the pre-action deltas must already
- *  be consumed one-to-one by the post-actions.
- *
- * ═══════════════════════════════════════════════════════════════════════════════
- *  MERKLE TREE VERIFICATION
- * ═══════════════════════════════════════════════════════════════════════════════
- *
- *  The user constructs a merkle tree off-chain where each leaf encodes one
- *  lending action configuration they approve:
- *
- *      leaf = keccak256(op ‖ lender ‖ lenderData)
- *
- *  The user signs only the 32-byte root.  Key properties:
- *
- *    1. ORDER-INDEPENDENT — Position of a leaf in the tree does not matter;
- *       sorted-pair hashing (min first) makes proof direction irrelevant.
- *
- *    2. SUBSET SELECTION — The solver picks only the actions it needs; unused
- *       leaves have zero on-chain cost.
- *
- *    3. SEPARATED CONCERNS — The leaf covers FIXED params (op, lender, pool
- *       addresses). VARIABLE params (asset, amount, receiver) are provided
- *       by the solver at execution time and validated by zero-sum accounting.
+ *  Example with maxFeeBps = 50 000 (0.5%), borrow 1000 USDC:
+ *    max fee = 1000 × 50 000 / 1e7 = 5 USDC
+ *    solver borrows 1005, repays 1000, keeps 5 ✓
  *
  * ═══════════════════════════════════════════════════════════════════════════════
  *  DATA LAYOUTS
@@ -97,7 +40,7 @@ import {UniversalSettlementLending} from "./lending/UniversalSettlementLending.s
  *   [32: merkleRoot][2: settlementDataLength][settlementData]
  *
  * @dev Execution data (solver-provided):
- *   [1: numPre][1: numPost]
+ *   [1: numPre][1: numPost][20: feeRecipient]
  *   [per action]:
  *       [20: asset][14: amount][20: receiver]          — variable params (54 B)
  *       [1: op][2: lender][2: dataLen][data]           — action config
@@ -113,20 +56,35 @@ abstract contract SettlementExecutor is UniversalSettlementLending {
     /// @dev Merkle proof does not reconstruct the signed root.
     error InvalidMerkleProof();
 
-    /// @dev At least one asset has a non-zero net delta after all phases.
+    /// @dev An asset has a negative delta or a non-borrow surplus.
     error UnbalancedSettlement();
+
+    /// @dev Borrow surplus exceeds the user-signed percentage cap.
+    error FeeExceedsMax();
+
+    // ── Constants ───────────────────────────────────────────
+
+    /// @dev LenderOps.BORROW — must match DeltaEnums.sol
+    uint256 private constant OP_BORROW = 1;
+
+    /// @dev Fee denominator — allows sub-basis-point precision.
+    ///      100% = 1e7.  1 bps = 1 000.  0.01 bps = 10.  1 unit = 0.0001 bps.
+    uint256 private constant FEE_DENOMINATOR = 1e7;
 
     // ── Types ───────────────────────────────────────────────
 
     /**
      * @notice Per-asset accounting entry.
-     * @param asset  Token address (derived from `assetUsed` returned by the lending operation).
-     * @param delta  Signed net flow through the contract.
-     *               Positive = surplus (received > sent), negative = deficit.
+     * @param asset          Token address (from lending operation's `assetUsed`).
+     * @param delta          Signed net flow.  Positive = surplus, negative = deficit.
+     * @param totalBorrowed  Gross amount received via BORROW ops on this asset.
+     *                       Used as the denominator for the percentage fee check.
+     *                       Zero means this asset was never borrowed — no fee allowed.
      */
     struct AssetDelta {
         address asset;
         int256 delta;
+        uint256 totalBorrowed;
     }
 
     // ── Settlement entry point ──────────────────────────────
@@ -135,12 +93,16 @@ abstract contract SettlementExecutor is UniversalSettlementLending {
      * @notice Execute a full settlement and assert zero-sum balances.
      *
      * @param callerAddress  The order signer / position owner.
+     * @param maxFeeBps      Maximum solver fee as a fraction of total borrow (user-signed).
+     *                       Denominator is 1e7 (100% = 1e7, 1 bps = 1 000).
+     *                       E.g. 50 000 = 0.5%, 500 = 0.005%.  Set to 0 for fee-free.
      * @param orderData      [32: merkleRoot][2: settlementLen][settlementData]
-     * @param executionData  [1: numPre][1: numPost][actions…]
+     * @param executionData  [1: numPre][1: numPost][20: feeRecipient][actions…]
      * @param fillerCalldata Forwarded to `_executeIntent` for DEX fills.
      */
     function _executeSettlement(
         address callerAddress,
+        uint256 maxFeeBps,
         bytes memory orderData,
         bytes memory executionData,
         bytes memory fillerCalldata
@@ -156,16 +118,18 @@ abstract contract SettlementExecutor is UniversalSettlementLending {
 
         uint256 numPre;
         uint256 numPost;
+        address feeRecipient;
         uint256 execOffset;
 
         assembly {
             let ed := add(executionData, 0x20)
             numPre := shr(248, mload(ed))
             numPost := shr(248, mload(add(ed, 1)))
-            execOffset := 2
+            feeRecipient := shr(96, mload(add(ed, 2)))
+            // header: 1 + 1 + 20 = 22 bytes
+            execOffset := 22
         }
 
-        // Worst case: every action touches a unique asset.
         AssetDelta[] memory deltas = new AssetDelta[](numPre + numPost);
         uint256 deltaCount;
 
@@ -184,33 +148,14 @@ abstract contract SettlementExecutor is UniversalSettlementLending {
             callerAddress, merkleRoot, executionData, execOffset, numPost, deltas, deltaCount
         );
 
-        // ── Stage 4: zero-sum check ──
-        _verifyZeroDeltas(deltas, deltaCount);
+        // ── Stage 4 + 5: sweep borrow fees, reject everything else ──
+        _sweepFeesAndVerify(deltas, deltaCount, feeRecipient, maxFeeBps);
     }
 
     // ── Merkle-verified action batch ────────────────────────
 
     /**
      * @notice Parse, verify, execute, and account for a batch of lending actions.
-     *
-     *         Per action the function:
-     *           1. Extracts variable params (asset, amount, receiver) from the blob.
-     *           2. Extracts the action config (op, lender, lenderData).
-     *           3. Hashes the config into a leaf and walks the merkle proof.
-     *           4. Reverts with `InvalidMerkleProof` if the root doesn't match.
-     *           5. Dispatches to `_lendingOperations`.
-     *           6. Accumulates the returned `(assetUsed, amountIn, amountOut)` into
-     *              the per-asset delta array.
-     *
-     * @param callerAddress The order signer.
-     * @param merkleRoot    Signed root covering all approved action configs.
-     * @param executionData Solver blob containing actions and proofs.
-     * @param execOffset    Current read cursor into executionData.
-     * @param count         Number of actions to execute in this batch.
-     * @param deltas        Delta accumulator (modified in-place).
-     * @param deltaCount    Current number of unique assets in `deltas`.
-     * @return newExecOffset  Advanced cursor.
-     * @return newDeltaCount  Updated unique-asset count.
      */
     function _executeActions(
         address callerAddress,
@@ -236,18 +181,15 @@ abstract contract SettlementExecutor is UniversalSettlementLending {
             assembly {
                 let ed := add(add(executionData, 0x20), newExecOffset)
 
-                // ── Variable params (54 bytes) ──
                 asset := shr(96, mload(ed))
                 amount := shr(144, mload(add(ed, 20)))
                 receiver := shr(96, mload(add(ed, 34)))
 
-                // ── Action config header (5 bytes) ──
                 let actionStart := add(ed, 54)
                 op := shr(248, mload(actionStart))
                 lender := and(0xffff, shr(240, mload(add(actionStart, 1))))
                 dataLen := and(0xffff, shr(240, mload(add(actionStart, 3))))
 
-                // ── Copy lenderData into bytes memory ──
                 let fmp := mload(0x40)
                 mstore(fmp, dataLen)
                 let src := add(actionStart, 5)
@@ -258,7 +200,6 @@ abstract contract SettlementExecutor is UniversalSettlementLending {
                 lenderData := fmp
                 mstore(0x40, add(dest, and(add(dataLen, 31), not(31))))
 
-                // ── Compute leaf = keccak256(op ‖ lender ‖ lenderData) ──
                 let leafLen := add(3, dataLen)
                 let scratch := mload(0x40)
                 mstore8(scratch, op)
@@ -269,7 +210,6 @@ abstract contract SettlementExecutor is UniversalSettlementLending {
                 }
                 let leaf := keccak256(scratch, leafLen)
 
-                // ── Walk merkle proof (sorted-pair hashing) ──
                 let proofStart := add(actionStart, add(5, dataLen))
                 let proofLen := shr(248, mload(proofStart))
                 let proofPtr := add(proofStart, 1)
@@ -289,20 +229,17 @@ abstract contract SettlementExecutor is UniversalSettlementLending {
                     proofPtr := add(proofPtr, 32)
                 }
 
-                // ── Root check ──
                 if xor(leaf, merkleRoot) {
                     mstore(0x00, 0xb05e92fa00000000000000000000000000000000000000000000000000000000)
                     revert(0x00, 0x04)
                 }
 
-                // ── Advance cursor ──
                 newExecOffset := add(
                     newExecOffset,
                     add(add(60, dataLen), mul(proofLen, 32))
                 )
             }
 
-            // Dispatch and fold into delta array.
             newDeltaCount = _dispatchAndAccumulate(
                 callerAddress, asset, amount, receiver, op, lender, lenderData, deltas, newDeltaCount
             );
@@ -314,10 +251,7 @@ abstract contract SettlementExecutor is UniversalSettlementLending {
     // ── Internal helpers ────────────────────────────────────
 
     /**
-     * @notice Dispatch one lending operation and fold its result into the deltas.
-     * @dev Extracted from `_executeActions` to stay below the EVM stack limit.
-     *      Uses `assetUsed` from the lending router — not the solver-declared
-     *      `asset` — so delta accounting is self-verifying.
+     * @notice Dispatch one lending operation, fold into deltas, track borrows.
      */
     function _dispatchAndAccumulate(
         address callerAddress,
@@ -334,85 +268,119 @@ abstract contract SettlementExecutor is UniversalSettlementLending {
             _lendingOperations(callerAddress, asset, amount, receiver, op, lender, lenderData);
 
         int256 change = int256(amountOut) - int256(amountIn);
-        if (change != 0) {
-            return _updateDelta(deltas, deltaCount, assetUsed, change);
+
+        // For BORROW ops, track the gross borrowed amount for fee % calculation
+        uint256 borrowAmount = (op == OP_BORROW) ? amountOut : 0;
+
+        if (change != 0 || borrowAmount != 0) {
+            newDeltaCount = _updateDelta(deltas, deltaCount, assetUsed, change, borrowAmount);
+        } else {
+            newDeltaCount = deltaCount;
         }
-        return deltaCount;
     }
 
     /**
-     * @notice Upsert a per-asset delta entry.
-     * @dev Linear scan — O(n) where n = number of unique assets in this
-     *      settlement, typically 2–4.  Appends a new entry when the asset
-     *      is seen for the first time.
+     * @notice Sweep borrow-surplus fees (percentage-checked) and verify all deltas resolve.
      *
-     * @param deltas Pre-allocated array (length ≥ numPre + numPost).
-     * @param count  Current number of occupied entries.
-     * @param asset  Token address to update.
-     * @param change Signed amount to add:  +amountOut − amountIn.
-     * @return newCount  `count` if the asset already existed, `count + 1` if new.
+     * @dev For each tracked asset:
+     *        delta > 0, totalBorrowed > 0 → fee check:
+     *            surplus × 10 000 ≤ totalBorrowed × maxFeeBps
+     *            If passes, transfer surplus to feeRecipient.
+     *        delta > 0, totalBorrowed == 0 → revert (non-borrow surplus)
+     *        delta < 0 → revert (deficit)
+     *        delta == 0 → ok
+     */
+    function _sweepFeesAndVerify(
+        AssetDelta[] memory deltas,
+        uint256 count,
+        address feeRecipient,
+        uint256 maxFeeBps
+    ) private {
+        for (uint256 i; i < count;) {
+            int256 d = deltas[i].delta;
+
+            if (d < 0) {
+                revert UnbalancedSettlement();
+            }
+
+            if (d > 0) {
+                uint256 surplus = uint256(d);
+                uint256 borrowed = deltas[i].totalBorrowed;
+
+                // Surplus only allowed on assets that were borrowed
+                if (borrowed == 0) revert UnbalancedSettlement();
+
+                // Percentage check: surplus / borrowed ≤ maxFeeBps / FEE_DENOMINATOR
+                // Rearranged to avoid division: surplus × FEE_DENOMINATOR ≤ borrowed × maxFeeBps
+                if (surplus * FEE_DENOMINATOR > borrowed * maxFeeBps) {
+                    revert FeeExceedsMax();
+                }
+
+                if (feeRecipient != address(0)) {
+                    _transferFee(deltas[i].asset, surplus, feeRecipient);
+                }
+            }
+
+            unchecked { ++i; }
+        }
+    }
+
+    /**
+     * @notice Transfer fee via ERC-20 transfer.
+     */
+    function _transferFee(address asset, uint256 amount, address recipient) private {
+        assembly {
+            mstore(0x00, 0xa9059cbb00000000000000000000000000000000000000000000000000000000)
+            mstore(0x04, recipient)
+            mstore(0x24, amount)
+
+            let success := call(gas(), asset, 0, 0x00, 0x44, 0x00, 0x20)
+            let rdsize := returndatasize()
+            success := and(
+                success,
+                or(iszero(rdsize), and(gt(rdsize, 31), eq(mload(0x00), 1)))
+            )
+            if iszero(success) {
+                returndatacopy(0, 0, rdsize)
+                revert(0, rdsize)
+            }
+        }
+    }
+
+    /**
+     * @notice Upsert a per-asset delta entry with borrow tracking.
+     * @param deltas       Pre-allocated array.
+     * @param count        Current number of occupied entries.
+     * @param asset        Token address to update.
+     * @param change       Signed delta change (+amountOut − amountIn).
+     * @param borrowAmount Gross borrow amount to add (0 for non-borrow ops).
      */
     function _updateDelta(
         AssetDelta[] memory deltas,
         uint256 count,
         address asset,
-        int256 change
+        int256 change,
+        uint256 borrowAmount
     ) internal pure returns (uint256 newCount) {
         for (uint256 i; i < count;) {
             if (deltas[i].asset == asset) {
                 deltas[i].delta += change;
+                deltas[i].totalBorrowed += borrowAmount;
                 return count;
             }
             unchecked { ++i; }
         }
-        deltas[count] = AssetDelta(asset, change);
+        deltas[count] = AssetDelta(asset, change, borrowAmount);
         return count + 1;
-    }
-
-    /**
-     * @notice Assert every tracked asset has a net-zero delta.
-     * @dev Called once at the end of `_executeSettlement`.
-     *      Reverts on the first non-zero entry.
-     */
-    function _verifyZeroDeltas(AssetDelta[] memory deltas, uint256 count) internal pure {
-        for (uint256 i; i < count;) {
-            if (deltas[i].delta != 0) revert UnbalancedSettlement();
-            unchecked { ++i; }
-        }
     }
 
     // ── Virtual hooks ───────────────────────────────────────
 
     /**
      * @notice Intent hook — called between pre-actions and post-actions.
-     *
-     * @dev Concrete implementations use this to execute asset conversions
-     *      (DEX swaps, RFQ fills, etc.).  The `deltas` array arrives with
-     *      the accumulated state from pre-actions and MUST be updated to
-     *      reflect any conversion:
-     *
-     *        _updateDelta(deltas, deltaCount, inputToken,  -int256(inputAmount));
-     *        _updateDelta(deltas, deltaCount, outputToken, +int256(outputAmount));
-     *
-     *      The orderData's `settlementData` region is the natural place to
-     *      encode user-signed constraints for the conversion, for example:
-     *
-     *        [20: inputToken][14: maxInput][20: outputToken][14: minOutput]
-     *
-     *      or an oracle address + acceptable price band.
-     *
-     *      If no conversion is needed the implementation returns `deltaCount`
-     *      unchanged and leaves the array untouched — post-actions must then
-     *      fully consume the pre-action deltas on their own.
-     *
-     * @param callerAddress  The order signer.
-     * @param orderData      Full order blob (settlementData at `[offset … offset+length)`).
-     * @param offset         Start of settlementData within orderData.
-     * @param length         Byte length of settlementData (0 = no-op).
-     * @param fillerCalldata Solver-provided payload for the conversion execution.
-     * @param deltas         Per-asset delta array (modified in-place).
-     * @param deltaCount     Current number of unique assets tracked.
-     * @return newDeltaCount Updated count (may grow if the conversion introduces a new asset).
+     * @dev Concrete implementations use this to execute asset conversions.
+     *      The `deltas` array MUST be updated in-place to reflect any conversion.
+     *      If no conversion is needed, return `deltaCount` unchanged.
      */
     function _executeIntent(
         address callerAddress,

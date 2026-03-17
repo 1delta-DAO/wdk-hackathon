@@ -9,7 +9,7 @@ import {SettlementExecutor} from "../SettlementExecutor.sol";
  * @notice Moolah (Lista DAO) flash loan callback that executes structured settlement flows.
  *
  * @dev Callback calldata layout (starting at offset 100, after ABI prefix):
- *   [20: origCaller][1: poolId]
+ *   [20: origCaller][1: poolId][8: maxFeeBps]
  *   [2: orderDataLen][orderDataLen: orderData]
  *   [2: fillerCalldataLen][fillerCalldataLen: fillerCalldata]
  *   [remaining: executionData]
@@ -24,10 +24,11 @@ abstract contract MoolahSettlementCallback is SettlementExecutor {
     }
 
     /**
-     * @notice Internal handler: validates caller, parses orderData + fillerCalldata + executionData
+     * @notice Internal handler: validates caller, parses origCaller + maxFee + orderData + fillerCalldata + executionData
      */
     function _onMoolahSettlementCallback() internal {
         address origCaller;
+        uint256 maxFeeBps;
         bytes memory orderData;
         bytes memory fillerCalldata;
         bytes memory executionData;
@@ -49,7 +50,11 @@ abstract contract MoolahSettlementCallback is SettlementExecutor {
 
             origCaller := shr(96, firstWord)
 
-            let baseOffset := 121
+            // maxFeeBps is 8 bytes (uint64) starting at offset 100 + 20 + 1 = 121
+            maxFeeBps := shr(192, calldataload(121))
+
+            // After origCaller(20) + poolId(1) + maxFeeBps(8) = calldata offset 129
+            let baseOffset := 129
             let orderLen := and(0xffff, shr(240, calldataload(baseOffset)))
 
             // Copy orderData
@@ -79,6 +84,6 @@ abstract contract MoolahSettlementCallback is SettlementExecutor {
             mstore(0x40, add(add(fmp, 0x20), and(add(execLen, 31), not(31))))
         }
 
-        _executeSettlement(origCaller, orderData, executionData, fillerCalldata);
+        _executeSettlement(origCaller, maxFeeBps, orderData, executionData, fillerCalldata);
     }
 }

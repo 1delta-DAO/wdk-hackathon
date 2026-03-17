@@ -7,6 +7,7 @@ import {SettlementExecutor} from "../src/core/settlement/SettlementExecutor.sol"
 /**
  * @notice Concrete harness that inherits SettlementExecutor.
  *         Overrides lending dispatch and intent to record calls instead of hitting real protocols.
+ *         Returns (asset, 0, 0) so deltas are always zero — isolates merkle tests from accounting.
  */
 contract SettlementHarness is SettlementExecutor {
     struct LendingCall {
@@ -96,7 +97,7 @@ contract SettlementHarness is SettlementExecutor {
         bytes memory executionData,
         bytes memory fillerCalldata
     ) external {
-        _executeSettlement(callerAddress, orderData, executionData, fillerCalldata);
+        _executeSettlement(callerAddress, 0, orderData, executionData, fillerCalldata);
     }
 }
 
@@ -125,6 +126,11 @@ contract SettlementExecutorTest is Test {
     }
 
     // ── Encoding helpers ────────────────────────────────────
+
+    /// @dev Execution data header: [1: numPre][1: numPost][20: feeRecipient][20: feeAsset][14: feeAmount]
+    function _execHeader(uint8 numPre, uint8 numPost) internal pure returns (bytes memory) {
+        return abi.encodePacked(numPre, numPost, address(0));
+    }
 
     function _orderData(bytes32 root, bytes memory settlement) internal pure returns (bytes memory) {
         return abi.encodePacked(root, uint16(settlement.length), settlement);
@@ -163,7 +169,7 @@ contract SettlementExecutorTest is Test {
 
         bytes memory od = _orderData(root, hex"DEADBEEF");
         bytes memory ed = abi.encodePacked(
-            uint8(1), uint8(1),
+            _execHeader(1, 1),
             _action(ASSET_A, 1000, RECEIVER, 0, 0, poolData, p0),
             _action(ASSET_B, 500, RECEIVER, 1, 1, borrowData, p1)
         );
@@ -192,7 +198,7 @@ contract SettlementExecutorTest is Test {
 
     function test_noActions_intentOnly() public {
         bytes memory od = _orderData(bytes32(0), hex"1234");
-        bytes memory ed = abi.encodePacked(uint8(0), uint8(0));
+        bytes memory ed = abi.encodePacked(_execHeader(0, 0));
 
         harness.executeSettlement(CALLER, od, ed, bytes(""));
 
@@ -213,7 +219,7 @@ contract SettlementExecutorTest is Test {
         proof[0] = fakeLeaf;
 
         bytes memory ed = abi.encodePacked(
-            uint8(1), uint8(0),
+            _execHeader(1, 0),
             _action(ASSET_A, 100, RECEIVER, 0, 0, badData, proof)
         );
 
@@ -242,7 +248,7 @@ contract SettlementExecutorTest is Test {
 
         bytes memory od = _orderData(root, hex"");
         bytes memory ed = abi.encodePacked(
-            uint8(1), uint8(0),
+            _execHeader(1, 0),
             _action(ASSET_A, 5000, RECEIVER, 0, 0, p2, proof)
         );
 
@@ -282,7 +288,7 @@ contract SettlementExecutorTest is Test {
 
     function test_fillerCalldata_passedToIntent() public {
         bytes memory od = _orderData(bytes32(0), hex"AA");
-        bytes memory ed = abi.encodePacked(uint8(0), uint8(0));
+        bytes memory ed = abi.encodePacked(_execHeader(0, 0));
         bytes memory filler = hex"DEADBEEFCAFE";
 
         harness.executeSettlement(CALLER, od, ed, filler);
@@ -307,7 +313,7 @@ contract SettlementExecutorTest is Test {
         pr3[0] = l2; pr3[1] = h01;
 
         return abi.encodePacked(
-            uint8(2), uint8(2),
+            _execHeader(2, 2),
             _actionPure(ASSET_A, 100, RECEIVER, 0, 0, d0, pr0),
             _actionPure(ASSET_A, 200, RECEIVER, 2, 0, d2, pr2),
             _actionPure(ASSET_B, 300, RECEIVER, 1, 0, d1, pr1),

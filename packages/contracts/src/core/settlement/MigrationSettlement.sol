@@ -63,11 +63,13 @@ contract MigrationSettlement is MorphoSettlementCallback, MorphoFlashLoans, Aave
 
         address user = _recoverOrderSigner(merkleRoot, deadline, settlementData, signature);
 
-        uint256 paramsLength = 5 + orderData.length + executionData.length;
+        // Callback: [20: user][1: poolId][8: maxFeeBps=0][2: orderLen][orderData][2: fillerLen=0][executionData]
+        uint256 paramsLength = 1 + 8 + 2 + orderData.length + 2 + executionData.length;
         bytes memory flashLoanData = abi.encodePacked(
             FLASH_LOAN_POOL,
             uint16(paramsLength),
             uint8(0), // poolId = 0 → Morpho Blue
+            uint64(0), // maxFeeBps = 0 (migration has no solver fee)
             uint16(orderData.length),
             orderData,
             uint16(0), // fillerCalldataLen = 0 (no swap/fill for simple migration)

@@ -74,7 +74,7 @@ contract MigrationTestHarness is MigrationSettlement {
         bytes memory orderData,
         bytes memory executionData
     ) external {
-        _executeSettlement(callerAddress, orderData, executionData, bytes(""));
+        _executeSettlement(callerAddress, 0, orderData, executionData, bytes(""));
     }
 
     function getLendingCallCount() external view returns (uint256) {
@@ -216,7 +216,7 @@ contract MigrationSettlementTest is Test {
 
         f.orderData = _orderData(f.root, settlement);
         f.executionData = abi.encodePacked(
-            uint8(2), uint8(2), // 2 pre, 2 post
+            uint8(2), uint8(2), address(0), // 2 pre, 2 post, no fee
             _action(DEBT_ASSET, 1000, RECEIVER, 2, 0, f.d0, pr0),   // pre: repay
             _action(COLL_ASSET, 5000, RECEIVER, 3, 0, f.d1, pr1),   // pre: withdraw
             _action(COLL_ASSET, 5000, RECEIVER, 0, 0, f.d2, pr2),   // post: deposit
@@ -365,7 +365,7 @@ contract MigrationSettlementTest is Test {
         proof[0] = fakeLeaf;
 
         bytes memory ed = abi.encodePacked(
-            uint8(1), uint8(0),
+            uint8(1), uint8(0), address(0),
             _action(DEBT_ASSET, 100, RECEIVER, 2, 0, badData, proof)
         );
 

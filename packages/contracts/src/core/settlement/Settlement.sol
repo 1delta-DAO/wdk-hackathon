@@ -5,14 +5,19 @@ pragma solidity 0.8.34;
 import {MorphoSettlementCallback} from "./flash-loan/MorphoSettlementCallback.sol";
 import {MoolahSettlementCallback} from "./flash-loan/MoolahSettlementCallback.sol";
 import {MorphoFlashLoans} from "./flash-loan/Morpho.sol";
+import {EIP712OrderVerifier} from "./EIP712OrderVerifier.sol";
 import {SettlementForwarder} from "./SettlementForwarder.sol";
 
 /**
  * @title Settlement
- * @notice Concrete settlement contract with external entry points for solvers.
- *         Supports direct settlement and flash-loan-wrapped settlement.
- *         Filler calldata is executed in an isolated forwarder contract
- *         that has no token approvals.
+ * @notice Concrete settlement contract with EIP-712 order verification, flash loan
+ *         support, delta-validated lending actions, and isolated DEX execution.
+ *
+ *         The user signs (merkleRoot, deadline, settlementData) via EIP-712.
+ *         The solver submits the signature along with execution data.
+ *         The contract recovers the signer and uses it as the position owner
+ *         for all lending operations, ensuring only the signer's positions
+ *         are touched.
  *
  * @dev settlementData format (inside orderData):
  *   [20: inputToken][14: inputAmount][20: outputToken][14: minOutputAmount]
@@ -23,7 +28,8 @@ import {SettlementForwarder} from "./SettlementForwarder.sol";
 contract Settlement is
     MorphoFlashLoans,
     MorphoSettlementCallback,
-    MoolahSettlementCallback
+    MoolahSettlementCallback,
+    EIP712OrderVerifier
 {
     SettlementForwarder public immutable forwarder;
 
@@ -37,48 +43,63 @@ contract Settlement is
 
     /**
      * @notice Direct settlement without flash loan.
-     * @param callerAddress The order signer whose positions are managed
-     * @param orderData Packed order: [32: merkleRoot][2: settlementLen][settlementData]
-     * @param executionData Solver-provided: [1: numPre][1: numPost][actions...]
-     * @param fillerCalldata Solver-provided DEX/fill calldata for the intent step
+     *         Verifies the EIP-712 signature, recovers the signer as position owner,
+     *         then executes the full pre-actions → intent → post-actions → fee → delta check flow.
+     * @param maxFeeBps          Maximum solver fee the user allows (must match signed orderData)
+     * @param deadline        Order expiry timestamp (included in signed data)
+     * @param signature       65-byte EIP-712 signature (r ++ s ++ v) from position owner
+     * @param orderData       Packed order: [32: merkleRoot][2: settlementLen][settlementData]
+     * @param executionData   Solver-provided: [1: numPre][1: numPost][20: feeRecipient][20: feeAsset][14: feeAmount][actions...]
+     * @param fillerCalldata  Solver-provided DEX/fill calldata for the intent step
      */
     function settle(
-        address callerAddress,
+        uint256 maxFeeBps,
+        uint48 deadline,
+        bytes calldata signature,
         bytes calldata orderData,
         bytes calldata executionData,
         bytes calldata fillerCalldata
     ) external {
-        _executeSettlement(callerAddress, orderData, executionData, fillerCalldata);
+        (address user,) = _verifyAndExtract(deadline, signature, orderData);
+        _executeSettlement(user, maxFeeBps, orderData, executionData, fillerCalldata);
     }
 
     /**
-     * @notice Flash-loan-wrapped settlement.
-     * @param callerAddress The order signer
-     * @param asset Token to flash borrow
-     * @param amount Amount to flash borrow
-     * @param flashLoanPool The Morpho-style pool to flash borrow from
-     * @param poolId Pool identifier (0 = Morpho Blue, etc.)
-     * @param orderData Packed order blob
-     * @param executionData Solver-provided action data
-     * @param fillerCalldata Solver-provided DEX/fill calldata
+     * @notice Flash-loan-wrapped settlement with EIP-712 order verification.
+     *         Recovers the signer from the signature, then initiates a Morpho flash
+     *         loan whose callback executes the full settlement flow.
+     * @param flashLoanAsset  Token to flash borrow
+     * @param flashLoanAmount Amount to flash borrow
+     * @param flashLoanPool   The Morpho-style pool to flash borrow from
+     * @param poolId          Pool identifier (0 = Morpho Blue, etc.)
+     * @param deadline        Order expiry timestamp
+     * @param signature       65-byte EIP-712 signature (r ++ s ++ v)
+     * @param orderData       Packed order blob
+     * @param executionData   Solver-provided action data
+     * @param fillerCalldata  Solver-provided DEX/fill calldata
      */
     function settleWithFlashLoan(
-        address callerAddress,
-        address asset,
-        uint256 amount,
+        address flashLoanAsset,
+        uint256 flashLoanAmount,
         address flashLoanPool,
         uint8 poolId,
+        uint256 maxFeeBps,
+        uint48 deadline,
+        bytes calldata signature,
         bytes calldata orderData,
         bytes calldata executionData,
         bytes calldata fillerCalldata
     ) external {
-        uint256 paramsLen = 20 + 1 + 2 + orderData.length + 2 + fillerCalldata.length + executionData.length;
+        (address user,) = _verifyAndExtract(deadline, signature, orderData);
+
+        // Callback layout: [20: user][1: poolId][8: maxFeeBps][2: orderLen][orderData][2: fillerLen][filler][executionData]
+        uint256 paramsLen = 1 + 8 + 2 + orderData.length + 2 + fillerCalldata.length + executionData.length;
 
         bytes memory fullData = abi.encodePacked(
             flashLoanPool,
             uint16(paramsLen),
-            callerAddress,
             poolId,
+            uint64(maxFeeBps),
             uint16(orderData.length),
             orderData,
             uint16(fillerCalldata.length),
@@ -86,7 +107,36 @@ contract Settlement is
             executionData
         );
 
-        morphoFlashLoan(asset, amount, callerAddress, fullData);
+        morphoFlashLoan(flashLoanAsset, flashLoanAmount, user, fullData);
+    }
+
+    // ── Order Verification ───────────────────────────────
+
+    /**
+     * @notice Parse orderData, recover the EIP-712 signer, and return both.
+     * @dev Extracts merkleRoot and settlementData from orderData, then calls
+     *      _recoverOrderSigner which checks the deadline and ecrecovers.
+     * @return user           The recovered signer (position owner)
+     * @return merkleRoot     The merkle root from orderData (for reference)
+     */
+    function _verifyAndExtract(
+        uint48 deadline,
+        bytes calldata signature,
+        bytes calldata orderData
+    ) internal view returns (address user, bytes32 merkleRoot) {
+        bytes memory settlementData;
+        assembly {
+            merkleRoot := calldataload(orderData.offset)
+            let sLen := shr(240, calldataload(add(orderData.offset, 32)))
+
+            let fmp := mload(0x40)
+            settlementData := fmp
+            mstore(fmp, sLen)
+            calldatacopy(add(fmp, 0x20), add(orderData.offset, 34), sLen)
+            mstore(0x40, add(add(fmp, 0x20), and(add(sLen, 31), not(31))))
+        }
+
+        user = _recoverOrderSigner(merkleRoot, deadline, settlementData, signature);
     }
 
     // ── Intent Implementation ────────────────────────────
@@ -195,7 +245,7 @@ contract Settlement is
         if (outputReceived < minOutputAmount) revert InsufficientOutput();
 
         // 6. Update deltas: input consumed, output received
-        newDeltaCount = _updateDelta(deltas, deltaCount, inputToken, -int256(inputAmount));
-        newDeltaCount = _updateDelta(deltas, newDeltaCount, outputToken, int256(outputReceived));
+        newDeltaCount = _updateDelta(deltas, deltaCount, inputToken, -int256(inputAmount), 0);
+        newDeltaCount = _updateDelta(deltas, newDeltaCount, outputToken, int256(outputReceived), 0);
     }
 }
