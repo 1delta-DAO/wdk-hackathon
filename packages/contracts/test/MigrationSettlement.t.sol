@@ -289,7 +289,6 @@ contract MigrationSettlementTest is Test {
         harness.runMigration(
             DEBT_ASSET,
             1000,
-            userAddr,
             deadline,
             sig,
             f.orderData,
@@ -320,13 +319,13 @@ contract MigrationSettlementTest is Test {
 
         vm.expectRevert(EIP712OrderVerifier.OrderExpired.selector);
         harness.runMigration(
-            DEBT_ASSET, 1000, userAddr, deadline, sig, f.orderData, f.executionData
+            DEBT_ASSET, 1000, deadline, sig, f.orderData, f.executionData
         );
     }
 
-    // ── Test: wrong signer reverts ──────────────────────────────────────
+    // ── Test: malformed signature reverts ───────────────────────────────
 
-    function test_runMigration_wrongSigner_reverts() public {
+    function test_runMigration_malformedSignature_reverts() public {
         sourcePool.setBorrowRate(5e25);
         destPool.setBorrowRate(3e25);
 
@@ -336,14 +335,11 @@ contract MigrationSettlementTest is Test {
         MigrationFixture memory f = _buildMigration(_settlementData());
 
         uint48 deadline = uint48(block.timestamp + 1 hours);
-
-        // Sign with a different private key than the declared user
-        (, uint256 imposterPk) = makeAddrAndKey("imposter");
-        bytes memory badSig = _signOrder(imposterPk, f.root, deadline, f.settlement);
+        bytes memory badSig = new bytes(65); // all zeros → ecrecover returns address(0)
 
         vm.expectRevert(EIP712OrderVerifier.InvalidOrderSignature.selector);
         harness.runMigration(
-            DEBT_ASSET, 1000, userAddr, deadline, badSig, f.orderData, f.executionData
+            DEBT_ASSET, 1000, deadline, badSig, f.orderData, f.executionData
         );
     }
 

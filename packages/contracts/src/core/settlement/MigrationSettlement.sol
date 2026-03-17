@@ -35,22 +35,19 @@ contract MigrationSettlement is MorphoSettlementCallback, MorphoFlashLoans, Aave
     /**
      * @param flashLoanAsset  The debt asset to flash-borrow
      * @param flashLoanAmount The debt amount to flash-borrow
-     * @param user            The position owner (origCaller for lending operations)
      * @param deadline        Order expiry timestamp (included in signed data)
-     * @param signature       65-byte EIP-712 signature (r ++ s ++ v) from `user`
+     * @param signature       65-byte EIP-712 signature (r ++ s ++ v) from position owner
      * @param orderData       Packed order: [32: merkleRoot][2: settlementDataLen][settlementData]
      * @param executionData   Solver blob: [1: numPre][1: numPost][actions with proofs...]
      */
     function runMigration(
         address flashLoanAsset,
         uint256 flashLoanAmount,
-        address user,
         uint48 deadline,
         bytes calldata signature,
         bytes calldata orderData,
         bytes calldata executionData
     ) external {
-        // Extract merkleRoot and settlementData from orderData for signature verification
         bytes32 merkleRoot;
         bytes memory settlementData;
         assembly {
@@ -64,7 +61,7 @@ contract MigrationSettlement is MorphoSettlementCallback, MorphoFlashLoans, Aave
             mstore(0x40, add(add(fmp, 0x20), and(add(sLen, 31), not(31))))
         }
 
-        _verifyOrder(user, merkleRoot, deadline, settlementData, signature);
+        address user = _recoverOrderSigner(merkleRoot, deadline, settlementData, signature);
 
         uint256 paramsLength = 5 + orderData.length + executionData.length;
         bytes memory flashLoanData = abi.encodePacked(
