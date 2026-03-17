@@ -77,19 +77,28 @@ contract MigrationSettlement is MorphoSettlementCallback, MorphoFlashLoans, Aave
     }
 
     /**
-     * @notice Intent hook: runs APR validation between pre-actions and post-actions.
-     * @param orderData The full order blob
-     * @param offset    Byte offset into orderData where settlementData begins
-     * @param length    Length of settlementData (0 = no APR check)
+     * @notice Intent hook — validates that the destination lending rate is better
+     *         than the source.  Performs NO asset conversion, so deltas pass
+     *         through unchanged; pre-action outputs must exactly match post-action
+     *         inputs for the zero-sum check to pass.
+     *
+     * @dev settlementData layout:
+     *        length == 0  →  no-op (skip APR check)
+     *        length >= 61 →  [1: intentType][20: sourcePool][20: destPool][20: borrowAsset]
+     *          intentType == 1  →  Aave V3 borrow-rate comparison
      */
     function _executeIntent(
         address, /* callerAddress */
         bytes memory orderData,
         uint256 offset,
         uint256 length,
-        bytes memory /* fillerCalldata */
-    ) internal view override {
-        if (length == 0) return;
+        bytes memory, /* fillerCalldata */
+        AssetDelta[] memory deltas,
+        uint256 deltaCount
+    ) internal view override returns (uint256 newDeltaCount) {
+        newDeltaCount = deltaCount;
+
+        if (length == 0) return newDeltaCount;
 
         uint256 intentType;
         address sourcePool;

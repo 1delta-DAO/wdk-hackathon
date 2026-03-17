@@ -37,7 +37,6 @@ contract Settlement is
 
     /**
      * @notice Direct settlement without flash loan.
-     *         For flows like: withdraw → swap → deposit.
      * @param callerAddress The order signer whose positions are managed
      * @param orderData Packed order: [32: merkleRoot][2: settlementLen][settlementData]
      * @param executionData Solver-provided: [1: numPre][1: numPost][actions...]
@@ -73,9 +72,6 @@ contract Settlement is
         bytes calldata executionData,
         bytes calldata fillerCalldata
     ) external {
-        // Build flash loan data: [20: pool][2: paramsLength][params...]
-        // params = [20: callerAddress][1: poolId][2: orderDataLen][orderData]
-        //          [2: fillerCalldataLen][fillerCalldata][executionData]
         uint256 paramsLen = 20 + 1 + 2 + orderData.length + 2 + fillerCalldata.length + executionData.length;
 
         bytes memory fullData = abi.encodePacked(
@@ -96,17 +92,34 @@ contract Settlement is
     // ── Intent Implementation ────────────────────────────
 
     /**
-     * @notice Executes the solver's fill/swap via the isolated forwarder.
-     * @dev If fillerCalldata is empty, this is a no-op (passthrough settlement).
+     * @notice Executes the solver's fill/swap via an isolated forwarder and folds
+     *         the conversion into the settlement's per-asset delta ledger.
+     *
+     * @dev Flow:
+     *      1. Parse user-signed constraints from settlementData:
+     *         [20: inputToken][14: inputAmount][20: outputToken][14: minOutputAmount]
+     *      2. Snapshot `balanceOf(outputToken)` on this contract.
+     *      3. Transfer `inputAmount` of `inputToken` to the forwarder.
+     *      4. Execute the solver-provided DEX calldata via the forwarder (sandboxed).
+     *      5. Sweep `outputToken` back from the forwarder.
+     *      6. Verify `outputReceived >= minOutputAmount`.
+     *      7. Update deltas:
+     *           delta[inputToken]  -= inputAmount
+     *           delta[outputToken] += outputReceived
+     *
+     *      If `fillerCalldata` is empty the function is a no-op — deltas pass
+     *      through unchanged and post-actions must consume them directly.
      */
     function _executeIntent(
         address, /* callerAddress */
         bytes memory orderData,
         uint256 offset,
         uint256 length,
-        bytes memory fillerCalldata
-    ) internal override {
-        if (fillerCalldata.length == 0) return;
+        bytes memory fillerCalldata,
+        AssetDelta[] memory deltas,
+        uint256 deltaCount
+    ) internal override returns (uint256 newDeltaCount) {
+        if (fillerCalldata.length == 0) return deltaCount;
 
         address inputToken;
         uint256 inputAmount;
@@ -150,11 +163,10 @@ contract Settlement is
         assembly {
             target := shr(96, mload(add(fillerCalldata, 0x20)))
         }
-        // Build calldata bytes for forwarder.execute
         uint256 fwdCalldataLen = fillerCalldata.length - 20;
         bytes memory fwdCalldata = new bytes(fwdCalldataLen);
         assembly {
-            let src := add(fillerCalldata, 0x34) // 0x20 (length prefix) + 20 (target)
+            let src := add(fillerCalldata, 0x34)
             let dest := add(fwdCalldata, 0x20)
             for { let i := 0 } lt(i, fwdCalldataLen) { i := add(i, 32) } {
                 mstore(add(dest, i), mload(add(src, i)))
@@ -179,6 +191,11 @@ contract Settlement is
             balAfter := mload(0)
         }
 
-        if (balAfter - balBefore < minOutputAmount) revert InsufficientOutput();
+        uint256 outputReceived = balAfter - balBefore;
+        if (outputReceived < minOutputAmount) revert InsufficientOutput();
+
+        // 6. Update deltas: input consumed, output received
+        newDeltaCount = _updateDelta(deltas, deltaCount, inputToken, -int256(inputAmount));
+        newDeltaCount = _updateDelta(deltas, newDeltaCount, outputToken, int256(outputReceived));
     }
 }

@@ -52,7 +52,8 @@ contract SettlementHarness is SettlementExecutor {
         uint256 lendingOperation,
         uint256 lender,
         bytes memory data
-    ) internal override returns (uint256 amountIn, uint256 amountOut) {
+    ) internal override returns (address assetUsed, uint256 amountIn, uint256 amountOut) {
+        assetUsed = asset;
         lendingCalls.push(LendingCall({
             callerAddress: callerAddress,
             asset: asset,
@@ -69,8 +70,11 @@ contract SettlementHarness is SettlementExecutor {
         bytes memory orderData,
         uint256 offset,
         uint256 length,
-        bytes memory fillerCalldata
-    ) internal override {
+        bytes memory fillerCalldata,
+        AssetDelta[] memory,
+        uint256 deltaCount
+    ) internal override returns (uint256 newDeltaCount) {
+        newDeltaCount = deltaCount;
         bytes memory settlementData = new bytes(length);
         assembly {
             let src := add(add(orderData, 0x20), offset)

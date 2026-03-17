@@ -14,30 +14,43 @@ import {DeltaErrors} from "../../errors/Errors.sol";
 
 /**
  * @title UniversalSettlementLending
- * @notice Unified lending router that dispatches any lending operation to the correct protocol handler.
- * @dev Inherits all protocol-specific settlement lending modules and routes operations based on
- *      (lendingOperation, lender) pairs. This is the single entry point for all lending interactions
- *      during order settlement.
+ * @notice Unified lending router — single entry point for all protocol interactions
+ *         during settlement.  Dispatches by (lendingOperation, lender) and returns
+ *         the asset address + signed amounts for zero-sum delta accounting.
  *
- *      Protocol routing uses LenderIds thresholds:
- *        - lender < 1000:  Aave V3
- *        - lender < 2000:  Aave V2
- *        - lender < 3000:  Compound V3
- *        - lender < 4000:  Compound V2
- *        - lender < 5000:  Morpho Blue
- *        - lender < 6000:  Silo V2
+ * @dev Protocol routing (LenderIds thresholds — exclusive upper bounds):
+ *
+ *        lender <  1 000  →  Aave V3
+ *        lender <  2 000  →  Aave V2
+ *        lender <  3 000  →  Compound V3
+ *        lender <  4 000  →  Compound V2
+ *        lender <  5 000  →  Morpho Blue
+ *        lender <  6 000  →  Silo V2
  *
  *      Operations (LenderOps):
- *        - DEPOSIT (0):               Deposit collateral to lending pool
- *        - BORROW (1):                Borrow assets from lending pool
- *        - REPAY (2):                 Repay borrowed debt
- *        - WITHDRAW (3):              Withdraw collateral from lending pool
- *        - DEPOSIT_LENDING_TOKEN (4): Morpho-only: supply loan token
- *        - WITHDRAW_LENDING_TOKEN (5):Morpho-only: withdraw loan token
  *
- *      Return values (uint256 amountIn, uint256 amountOut):
- *        - Withdraw/Repay: returns the remaining deposit/borrow balance after the operation
- *        - Deposit/Borrow: returns (0, 0) for a consistent return layout
+ *        0  DEPOSIT               — deposit collateral
+ *        1  BORROW                — borrow assets
+ *        2  REPAY                 — repay debt
+ *        3  WITHDRAW              — withdraw collateral
+ *        4  DEPOSIT_LENDING_TOKEN — Morpho-only: supply loan token
+ *        5  WITHDRAW_LENDING_TOKEN— Morpho-only: withdraw loan token
+ *
+ *      Return layout  (address assetUsed, uint256 amountIn, uint256 amountOut):
+ *
+ *        • assetUsed — The ERC-20 token the operation moved.  Set at the router
+ *          level to the `asset` parameter, making delta accounting self-verifying:
+ *          the executor tracks what the lending stack ACTUALLY touched, not what
+ *          the solver declared.
+ *
+ *        • amountIn  — Resolved tokens the contract sent to the protocol.
+ *          Non-zero for DEPOSIT / REPAY / DEPOSIT_LENDING_TOKEN.
+ *
+ *        • amountOut — Resolved tokens the contract received from the protocol.
+ *          Non-zero for WITHDRAW / BORROW / WITHDRAW_LENDING_TOKEN.
+ *
+ *      "Resolved" means sentinel values (0 → balance, type(uint112).max → safe
+ *      max) have been replaced with the concrete amount that was actually moved.
  */
 abstract contract UniversalSettlementLending is
     AaveSettlementLending,
@@ -56,6 +69,7 @@ abstract contract UniversalSettlementLending is
      * @param lendingOperation The lending operation type (from LenderOps)
      * @param lender The lender identifier (from LenderIds)
      * @param data Lender-specific data blob (bytes memory)
+     * @return assetUsed The actual token address operated on (for delta accounting)
      * @return amountIn The resolved amount paid/consumed (deposit, repay) or 0 (withdraw, borrow)
      * @return amountOut The resolved amount received/withdrawn (withdraw, borrow) or 0 (deposit, repay)
      */
@@ -70,24 +84,26 @@ abstract contract UniversalSettlementLending is
     )
         internal
         virtual
-        returns (uint256 amountIn, uint256 amountOut)
+        returns (address assetUsed, uint256 amountIn, uint256 amountOut)
     {
+        assetUsed = asset;
+
         /**
          * Deposit collateral
          */
         if (lendingOperation == LenderOps.DEPOSIT) {
             if (lender < LenderIds.UP_TO_AAVE_V3) {
-                _depositToAaveV3(asset, amount, receiver, data);
+                (amountIn, amountOut) = _depositToAaveV3(asset, amount, receiver, data);
             } else if (lender < LenderIds.UP_TO_AAVE_V2) {
-                _depositToAaveV2(asset, amount, receiver, data);
+                (amountIn, amountOut) = _depositToAaveV2(asset, amount, receiver, data);
             } else if (lender < LenderIds.UP_TO_COMPOUND_V3) {
-                _depositToCompoundV3(asset, amount, receiver, data);
+                (amountIn, amountOut) = _depositToCompoundV3(asset, amount, receiver, data);
             } else if (lender < LenderIds.UP_TO_COMPOUND_V2) {
-                _depositToCompoundV2(asset, amount, receiver, data);
+                (amountIn, amountOut) = _depositToCompoundV2(asset, amount, receiver, data);
             } else if (lender < LenderIds.UP_TO_MORPHO) {
-                _encodeMorphoDepositCollateral(asset, amount, receiver, callerAddress, data);
+                (amountIn, amountOut) = _encodeMorphoDepositCollateral(asset, amount, receiver, callerAddress, data);
             } else if (lender < LenderIds.UP_TO_SILO_V2) {
-                _depositToSiloV2(asset, amount, receiver, data);
+                (amountIn, amountOut) = _depositToSiloV2(asset, amount, receiver, data);
             } else {
                 _invalidOperation();
             }
@@ -97,15 +113,15 @@ abstract contract UniversalSettlementLending is
          */
         else if (lendingOperation == LenderOps.BORROW) {
             if (lender < LenderIds.UP_TO_AAVE_V2) {
-                _borrowFromAave(asset, amount, receiver, callerAddress, data);
+                (amountIn, amountOut) = _borrowFromAave(asset, amount, receiver, callerAddress, data);
             } else if (lender < LenderIds.UP_TO_COMPOUND_V3) {
-                _borrowFromCompoundV3(asset, amount, receiver, callerAddress, data);
+                (amountIn, amountOut) = _borrowFromCompoundV3(asset, amount, receiver, callerAddress, data);
             } else if (lender < LenderIds.UP_TO_COMPOUND_V2) {
-                _borrowFromCompoundV2(asset, amount, receiver, callerAddress, data);
+                (amountIn, amountOut) = _borrowFromCompoundV2(asset, amount, receiver, callerAddress, data);
             } else if (lender < LenderIds.UP_TO_MORPHO) {
-                _morphoBorrow(asset, amount, receiver, callerAddress, data);
+                (amountIn, amountOut) = _morphoBorrow(asset, amount, receiver, callerAddress, data);
             } else if (lender < LenderIds.UP_TO_SILO_V2) {
-                _borrowFromSiloV2(asset, amount, receiver, callerAddress, data);
+                (amountIn, amountOut) = _borrowFromSiloV2(asset, amount, receiver, callerAddress, data);
             } else {
                 _invalidOperation();
             }
@@ -150,7 +166,7 @@ abstract contract UniversalSettlementLending is
          * deposit lendingToken
          */
         else if (lendingOperation == LenderOps.DEPOSIT_LENDING_TOKEN) {
-            _encodeMorphoDeposit(asset, amount, receiver, callerAddress, data);
+            (amountIn, amountOut) = _encodeMorphoDeposit(asset, amount, receiver, callerAddress, data);
         }
         /**
          * withdraw lendingToken

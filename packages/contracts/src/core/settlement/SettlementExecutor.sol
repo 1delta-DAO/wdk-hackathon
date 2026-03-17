@@ -6,137 +6,138 @@ import {UniversalSettlementLending} from "./lending/UniversalSettlementLending.s
 
 /**
  * @title SettlementExecutor
- * @notice Executes structured settlement flows: pre-actions → intent → post-actions.
- *         Uses a merkle root to verify that each action the solver chooses was
- *         pre-approved by the order signer.
+ * @notice Orchestrates three-phase lending settlements with merkle-verified actions
+ *         and per-asset zero-sum accounting.
  *
  * ═══════════════════════════════════════════════════════════════════════════════
- *  MERKLE TREE VERIFICATION MODEL
+ *  OVERVIEW
  * ═══════════════════════════════════════════════════════════════════════════════
  *
- *  The user constructs a merkle tree off-chain where each leaf represents one
- *  lending action configuration they are willing to allow:
+ *  A settlement executes four stages in sequence:
+ *
+ *      1. PRE-ACTIONS   — Merkle-verified lending ops (withdraw, repay, …)
+ *      2. INTENT        — Optional asset conversion (e.g. DEX swap)
+ *      3. POST-ACTIONS  — Merkle-verified lending ops (deposit, borrow, …)
+ *      4. VALIDATION    — Assert every per-asset delta is zero
+ *
+ *  The invariant enforced by stage 4 guarantees that every token the contract
+ *  receives during the settlement is fully consumed — nothing is left behind
+ *  and nothing is created from thin air.
+ *
+ * ═══════════════════════════════════════════════════════════════════════════════
+ *  ZERO-SUM DELTA ACCOUNTING
+ * ═══════════════════════════════════════════════════════════════════════════════
+ *
+ *  Each lending operation returns three values:
+ *
+ *      (address assetUsed, uint256 amountIn, uint256 amountOut)
+ *
+ *    • assetUsed  — the ERC-20 address the operation actually touched
+ *    • amountIn   — tokens the contract sent to the protocol  (deposit / repay)
+ *    • amountOut  — tokens the contract received from the protocol (withdraw / borrow)
+ *
+ *  The executor maintains a compact array of AssetDelta structs.
+ *  After each operation the corresponding entry is updated:
+ *
+ *      delta[assetUsed] += int256(amountOut) − int256(amountIn)
+ *
+ *  The intent phase (stage 2) may further modify deltas when it converts one
+ *  asset into another — it subtracts the input amount and adds the output
+ *  amount, potentially introducing a new asset entry.
+ *
+ *  Asset identification is SELF-VERIFYING: deltas use the `assetUsed` address
+ *  returned by the lending router, not the `asset` field the solver declared
+ *  in the execution blob.  A dishonest solver cannot mis-label an asset to
+ *  break accounting because the lending operation itself determines what token
+ *  was moved.
+ *
+ *  Example — cross-asset migration with a swap:
+ *
+ *    ┌─────────────────────────┬──────────────┬──────────────┐
+ *    │ Stage                   │ WETH delta   │ USDC delta   │
+ *    ├─────────────────────────┼──────────────┼──────────────┤
+ *    │ Pre:  withdraw 100 WETH │ +100         │              │
+ *    │ Pre:  repay 5 000 USDC  │              │ −5 000       │
+ *    │ Intent: swap WETH→USDC  │ −100         │ +5 000       │
+ *    │ Post: deposit 100 WETH  │  — (net 0)   │              │
+ *    │ Post: borrow 5 000 USDC │              │  — (net 0)   │
+ *    ├─────────────────────────┼──────────────┼──────────────┤
+ *    │ Net                     │ 0 ✓          │ 0 ✓          │
+ *    └─────────────────────────┴──────────────┴──────────────┘
+ *
+ *  If the intent is empty (no conversion), the pre-action deltas must already
+ *  be consumed one-to-one by the post-actions.
+ *
+ * ═══════════════════════════════════════════════════════════════════════════════
+ *  MERKLE TREE VERIFICATION
+ * ═══════════════════════════════════════════════════════════════════════════════
+ *
+ *  The user constructs a merkle tree off-chain where each leaf encodes one
+ *  lending action configuration they approve:
  *
  *      leaf = keccak256(op ‖ lender ‖ lenderData)
  *
- *  The tree is built from an unordered set of approved actions. The user signs
- *  only the 32-byte merkle root. This single root is sufficient to validate
- *  ANY subset of the approved leaves — the solver can pick 1, 2, or all of
- *  them in any order, and each is independently verified against the same root.
+ *  The user signs only the 32-byte root.  Key properties:
  *
- *  Key properties:
+ *    1. ORDER-INDEPENDENT — Position of a leaf in the tree does not matter;
+ *       sorted-pair hashing (min first) makes proof direction irrelevant.
  *
- *  1. ORDER-INDEPENDENT — The position of a leaf in the tree does not matter.
- *     A leaf at index 0 and a leaf at index 3 are equally valid; they simply
- *     require different proof paths. The solver can execute actions in any
- *     sequence (e.g., use leaf 3 as a pre-action and leaf 0 as a post-action).
+ *    2. SUBSET SELECTION — The solver picks only the actions it needs; unused
+ *       leaves have zero on-chain cost.
  *
- *  2. ONE ROOT, MANY LEAVES — A single bytes32 root covers the entire set of
- *     approved actions. Whether the user approves 2 or 20 actions, the order
- *     data remains 32 bytes (plus settlement params). The proof cost scales
- *     logarithmically: log2(N) sibling hashes per action verified.
- *
- *  3. SUBSET SELECTION — The solver is not required to use all leaves. They
- *     pick only the actions needed for the specific settlement strategy and
- *     provide proofs for just those. Unused leaves incur zero on-chain cost.
- *
- *  4. REUSE ACROSS SETTLEMENTS — The same signed order (same root) can be
- *     settled multiple times with different action selections. Today the solver
- *     picks Aave (best rate), tomorrow they pick Morpho — same user signature.
- *
- *  5. SEPARATED CONCERNS — The leaf contains only the FIXED lending parameters
- *     (operation type, lender ID, protocol-specific data like pool addresses
- *     or market params). The VARIABLE parameters (asset, amount, receiver)
- *     are provided by the solver at execution time and are NOT part of the
- *     leaf or the merkle tree. This separation is what enables solver autonomy.
- *
- *  Proof verification uses sorted-pair hashing (smaller hash first) so that
- *  proof elements work regardless of whether the node is a left or right child:
- *
- *      parent = keccak256(min(a, b) ‖ max(a, b))
- *
- *  Example with 4 approved actions:
- *
- *              root                    ← user signs this (32 bytes)
- *             /    \
- *           h01     h23
- *          /   \   /   \
- *        L0    L1 L2   L3              ← each is keccak256(op ‖ lender ‖ data)
- *
- *  To use L2, solver provides proof [L3, h01]. Verification:
- *    1. hash(L2, L3) → h23     (sorted: min(L2,L3) first)
- *    2. hash(h01, h23) → root  (sorted: min(h01,h23) first)
- *    3. Compare with signed root ✓
- *
- * ═══════════════════════════════════════════════════════════════════════════════
- *  EXECUTION FLOW
- * ═══════════════════════════════════════════════════════════════════════════════
- *
- *  _executeSettlement orchestrates a 3-phase flow:
- *
- *    Phase 1: PRE-ACTIONS
- *      For each of numPre actions, the executor:
- *        a) Parses variable params (asset, amount, receiver) from executionData
- *        b) Parses action config (op, lender, lenderData) from executionData
- *        c) Computes the leaf hash from the action config
- *        d) Walks the merkle proof to reconstruct the root
- *        e) Reverts with InvalidMerkleProof() if root doesn't match
- *        f) Dispatches the verified action to _lendingOperations
- *
- *    Phase 2: INTENT SETTLEMENT
- *      Calls _executeIntent (virtual) with the settlementData from orderData
- *      and the solver's fillerCalldata. Concrete implementations use this to
- *      execute swaps via an isolated forwarder contract.
- *
- *    Phase 3: POST-ACTIONS
- *      Same as Phase 1, for numPost actions.
+ *    3. SEPARATED CONCERNS — The leaf covers FIXED params (op, lender, pool
+ *       addresses). VARIABLE params (asset, amount, receiver) are provided
+ *       by the solver at execution time and validated by zero-sum accounting.
  *
  * ═══════════════════════════════════════════════════════════════════════════════
  *  DATA LAYOUTS
  * ═══════════════════════════════════════════════════════════════════════════════
  *
- * @dev Order data (signed by user — compact, constant-size header):
- *   [32: merkleRoot]                    — covers all approved action configs
- *   [2: settlementDataLength (uint16)]
- *   [settlementDataLength: settlementData]
+ * @dev Order data (signed by user):
+ *   [32: merkleRoot][2: settlementDataLength][settlementData]
  *
- * @dev Execution data (provided by solver at runtime — variable-size):
- *   [1: numPreActions (uint8)]
- *   [1: numPostActions (uint8)]
- *   [per action (pre-actions first, then post-actions)]:
- *       ┌─ variable params (54 bytes) ─────────────────────────┐
- *       │ [20: asset (address)]                                │
- *       │ [14: amount (uint112)]                               │
- *       │ [20: receiver (address)]                             │
- *       ├─ action config (5 + lenderDataLength bytes) ─────────┤
- *       │ [1: lendingOperation (uint8)]                        │
- *       │ [2: lender (uint16)]                                 │
- *       │ [2: lenderDataLength (uint16)]                       │
- *       │ [lenderDataLength: lenderData]                       │
- *       ├─ merkle proof ───────────────────────────────────────┤
- *       │ [1: proofLength (uint8, count of 32-byte siblings)]  │
- *       │ [proofLength * 32: merkle proof siblings]            │
- *       └──────────────────────────────────────────────────────┘
+ * @dev Execution data (solver-provided):
+ *   [1: numPre][1: numPost]
+ *   [per action]:
+ *       [20: asset][14: amount][20: receiver]          — variable params (54 B)
+ *       [1: op][2: lender][2: dataLen][data]           — action config
+ *       [1: proofLen][proofLen × 32: proof siblings]   — merkle proof
  *
- *   Total bytes per action: 60 + lenderDataLength + proofLength * 32
- *
- * @dev Amount sentinel values:
- *   0                       — use the contract's current balance of the asset
- *   type(uint112).max       — protocol-specific "safe max" (full user balance)
+ * @dev Amount sentinels:
+ *   0                 — contract's current token balance
+ *   type(uint112).max — protocol-specific "safe max" (full user position)
  */
 abstract contract SettlementExecutor is UniversalSettlementLending {
+    // ── Errors ──────────────────────────────────────────────
+
+    /// @dev Merkle proof does not reconstruct the signed root.
     error InvalidMerkleProof();
 
+    /// @dev At least one asset has a non-zero net delta after all phases.
+    error UnbalancedSettlement();
+
+    // ── Types ───────────────────────────────────────────────
+
     /**
-     * @notice Execute a full settlement: pre-actions, intent, post-actions.
-     *         The merkle root is extracted once from orderData and used to verify
-     *         every action in both pre and post phases. Each action is verified
-     *         independently — the solver can pick any subset of approved leaves
-     *         in any order.
-     * @param callerAddress The order signer / original caller
-     * @param orderData Packed order blob: [32: merkleRoot][2: settlementLen][settlementData]
-     * @param executionData Solver-provided blob: [1: numPre][1: numPost][actions with proofs...]
-     * @param fillerCalldata Solver-provided calldata forwarded to _executeIntent for DEX fills
+     * @notice Per-asset accounting entry.
+     * @param asset  Token address (derived from `assetUsed` returned by the lending operation).
+     * @param delta  Signed net flow through the contract.
+     *               Positive = surplus (received > sent), negative = deficit.
+     */
+    struct AssetDelta {
+        address asset;
+        int256 delta;
+    }
+
+    // ── Settlement entry point ──────────────────────────────
+
+    /**
+     * @notice Execute a full settlement and assert zero-sum balances.
+     *
+     * @param callerAddress  The order signer / position owner.
+     * @param orderData      [32: merkleRoot][2: settlementLen][settlementData]
+     * @param executionData  [1: numPre][1: numPost][actions…]
+     * @param fillerCalldata Forwarded to `_executeIntent` for DEX fills.
      */
     function _executeSettlement(
         address callerAddress,
@@ -164,47 +165,64 @@ abstract contract SettlementExecutor is UniversalSettlementLending {
             execOffset := 2
         }
 
-        // Execute pre-actions
-        execOffset = _executeActions(callerAddress, merkleRoot, executionData, execOffset, numPre);
+        // Worst case: every action touches a unique asset.
+        AssetDelta[] memory deltas = new AssetDelta[](numPre + numPost);
+        uint256 deltaCount;
 
-        // Execute intent settlement (settlementData starts at byte 34 of orderData)
-        _executeIntent(callerAddress, orderData, 34, settlementLen, fillerCalldata);
+        // ── Stage 1: pre-actions ──
+        (execOffset, deltaCount) = _executeActions(
+            callerAddress, merkleRoot, executionData, execOffset, numPre, deltas, deltaCount
+        );
 
-        // Execute post-actions
-        _executeActions(callerAddress, merkleRoot, executionData, execOffset, numPost);
+        // ── Stage 2: intent (optional conversion) ──
+        deltaCount = _executeIntent(
+            callerAddress, orderData, 34, settlementLen, fillerCalldata, deltas, deltaCount
+        );
+
+        // ── Stage 3: post-actions ──
+        (execOffset, deltaCount) = _executeActions(
+            callerAddress, merkleRoot, executionData, execOffset, numPost, deltas, deltaCount
+        );
+
+        // ── Stage 4: zero-sum check ──
+        _verifyZeroDeltas(deltas, deltaCount);
     }
 
+    // ── Merkle-verified action batch ────────────────────────
+
     /**
-     * @notice Execute a batch of merkle-verified lending actions.
+     * @notice Parse, verify, execute, and account for a batch of lending actions.
      *
-     *         For each action, the function:
-     *         1. Parses the solver-provided variable params (asset, amount, receiver)
-     *         2. Parses the action config (op, lender, lenderData)
-     *         3. Reconstructs the leaf: keccak256(op ‖ lender ‖ lenderData)
-     *         4. Walks the merkle proof using sorted-pair hashing to compute the root
-     *         5. Reverts if the computed root != the signed merkleRoot
-     *         6. Dispatches the action to _lendingOperations
+     *         Per action the function:
+     *           1. Extracts variable params (asset, amount, receiver) from the blob.
+     *           2. Extracts the action config (op, lender, lenderData).
+     *           3. Hashes the config into a leaf and walks the merkle proof.
+     *           4. Reverts with `InvalidMerkleProof` if the root doesn't match.
+     *           5. Dispatches to `_lendingOperations`.
+     *           6. Accumulates the returned `(assetUsed, amountIn, amountOut)` into
+     *              the per-asset delta array.
      *
-     *         The same merkleRoot is used for every action. Because sorted-pair
-     *         hashing produces the same root regardless of tree position, the
-     *         solver can present leaves in any order — a leaf used as pre-action
-     *         by one solver could be used as a post-action by another.
-     *
-     * @param callerAddress The order signer
-     * @param merkleRoot The root hash of allowed action configs (one root validates all leaves)
-     * @param executionData The solver-provided blob containing actions + proofs
-     * @param execOffset Current byte offset into executionData
-     * @param count Number of actions to execute
-     * @return newExecOffset Updated offset into executionData
+     * @param callerAddress The order signer.
+     * @param merkleRoot    Signed root covering all approved action configs.
+     * @param executionData Solver blob containing actions and proofs.
+     * @param execOffset    Current read cursor into executionData.
+     * @param count         Number of actions to execute in this batch.
+     * @param deltas        Delta accumulator (modified in-place).
+     * @param deltaCount    Current number of unique assets in `deltas`.
+     * @return newExecOffset  Advanced cursor.
+     * @return newDeltaCount  Updated unique-asset count.
      */
     function _executeActions(
         address callerAddress,
         bytes32 merkleRoot,
         bytes memory executionData,
         uint256 execOffset,
-        uint256 count
-    ) internal returns (uint256 newExecOffset) {
+        uint256 count,
+        AssetDelta[] memory deltas,
+        uint256 deltaCount
+    ) internal returns (uint256 newExecOffset, uint256 newDeltaCount) {
         newExecOffset = execOffset;
+        newDeltaCount = deltaCount;
 
         for (uint256 i; i < count;) {
             uint256 op;
@@ -218,18 +236,18 @@ abstract contract SettlementExecutor is UniversalSettlementLending {
             assembly {
                 let ed := add(add(executionData, 0x20), newExecOffset)
 
-                // Parse variable params: [20: asset][14: amount][20: receiver] = 54 bytes
+                // ── Variable params (54 bytes) ──
                 asset := shr(96, mload(ed))
                 amount := shr(144, mload(add(ed, 20)))
                 receiver := shr(96, mload(add(ed, 34)))
 
-                // Parse action config: [1: op][2: lender][2: dataLen] = 5 bytes
+                // ── Action config header (5 bytes) ──
                 let actionStart := add(ed, 54)
                 op := shr(248, mload(actionStart))
                 lender := and(0xffff, shr(240, mload(add(actionStart, 1))))
                 dataLen := and(0xffff, shr(240, mload(add(actionStart, 3))))
 
-                // Build bytes memory for lenderData
+                // ── Copy lenderData into bytes memory ──
                 let fmp := mload(0x40)
                 mstore(fmp, dataLen)
                 let src := add(actionStart, 5)
@@ -240,26 +258,22 @@ abstract contract SettlementExecutor is UniversalSettlementLending {
                 lenderData := fmp
                 mstore(0x40, add(dest, and(add(dataLen, 31), not(31))))
 
-                // Compute leaf = keccak256(op ++ lender ++ lenderData)
-                // Pack into scratch space: [1: op][2: lender][dataLen: lenderData]
+                // ── Compute leaf = keccak256(op ‖ lender ‖ lenderData) ──
                 let leafLen := add(3, dataLen)
                 let scratch := mload(0x40)
-                // Store op (1 byte) and lender (2 bytes) at the start
                 mstore8(scratch, op)
                 mstore8(add(scratch, 1), shr(8, lender))
                 mstore8(add(scratch, 2), and(0xff, lender))
-                // Copy lenderData
                 for { let j := 0 } lt(j, dataLen) { j := add(j, 32) } {
                     mstore(add(add(scratch, 3), j), mload(add(src, j)))
                 }
                 let leaf := keccak256(scratch, leafLen)
 
-                // Parse proof: [1: proofLength][proofLength * 32: proof]
+                // ── Walk merkle proof (sorted-pair hashing) ──
                 let proofStart := add(actionStart, add(5, dataLen))
                 let proofLen := shr(248, mload(proofStart))
                 let proofPtr := add(proofStart, 1)
 
-                // Verify merkle proof
                 for { let p := 0 } lt(p, proofLen) { p := add(p, 1) } {
                     let sibling := mload(proofPtr)
                     switch lt(leaf, sibling)
@@ -275,40 +289,138 @@ abstract contract SettlementExecutor is UniversalSettlementLending {
                     proofPtr := add(proofPtr, 32)
                 }
 
-                // Check against root
+                // ── Root check ──
                 if xor(leaf, merkleRoot) {
-                    // InvalidMerkleProof()
                     mstore(0x00, 0xb05e92fa00000000000000000000000000000000000000000000000000000000)
                     revert(0x00, 0x04)
                 }
 
-                // Advance offset: 20(asset) + 14(amount) + 20(receiver) + 1(op) + 2(lender)
-                //                  + 2(dataLen) + dataLen + 1(proofLen) + proofLen*32 = 60 + dataLen + proofLen*32
+                // ── Advance cursor ──
                 newExecOffset := add(
                     newExecOffset,
                     add(add(60, dataLen), mul(proofLen, 32))
                 )
             }
 
-            _lendingOperations(callerAddress, asset, amount, receiver, op, lender, lenderData);
+            // Dispatch and fold into delta array.
+            newDeltaCount = _dispatchAndAccumulate(
+                callerAddress, asset, amount, receiver, op, lender, lenderData, deltas, newDeltaCount
+            );
 
             unchecked { ++i; }
         }
     }
 
+    // ── Internal helpers ────────────────────────────────────
+
     /**
-     * @notice Virtual hook for the intent settlement step (swap/fill)
-     * @param callerAddress The order signer
-     * @param orderData The full order blob (settlementData is at orderData[offset..offset+length])
-     * @param offset Byte offset into orderData where settlementData begins
-     * @param length Length of the settlementData
-     * @param fillerCalldata Solver-provided calldata for DEX/fill execution
+     * @notice Dispatch one lending operation and fold its result into the deltas.
+     * @dev Extracted from `_executeActions` to stay below the EVM stack limit.
+     *      Uses `assetUsed` from the lending router — not the solver-declared
+     *      `asset` — so delta accounting is self-verifying.
+     */
+    function _dispatchAndAccumulate(
+        address callerAddress,
+        address asset,
+        uint256 amount,
+        address receiver,
+        uint256 op,
+        uint256 lender,
+        bytes memory lenderData,
+        AssetDelta[] memory deltas,
+        uint256 deltaCount
+    ) private returns (uint256 newDeltaCount) {
+        (address assetUsed, uint256 amountIn, uint256 amountOut) =
+            _lendingOperations(callerAddress, asset, amount, receiver, op, lender, lenderData);
+
+        int256 change = int256(amountOut) - int256(amountIn);
+        if (change != 0) {
+            return _updateDelta(deltas, deltaCount, assetUsed, change);
+        }
+        return deltaCount;
+    }
+
+    /**
+     * @notice Upsert a per-asset delta entry.
+     * @dev Linear scan — O(n) where n = number of unique assets in this
+     *      settlement, typically 2–4.  Appends a new entry when the asset
+     *      is seen for the first time.
+     *
+     * @param deltas Pre-allocated array (length ≥ numPre + numPost).
+     * @param count  Current number of occupied entries.
+     * @param asset  Token address to update.
+     * @param change Signed amount to add:  +amountOut − amountIn.
+     * @return newCount  `count` if the asset already existed, `count + 1` if new.
+     */
+    function _updateDelta(
+        AssetDelta[] memory deltas,
+        uint256 count,
+        address asset,
+        int256 change
+    ) internal pure returns (uint256 newCount) {
+        for (uint256 i; i < count;) {
+            if (deltas[i].asset == asset) {
+                deltas[i].delta += change;
+                return count;
+            }
+            unchecked { ++i; }
+        }
+        deltas[count] = AssetDelta(asset, change);
+        return count + 1;
+    }
+
+    /**
+     * @notice Assert every tracked asset has a net-zero delta.
+     * @dev Called once at the end of `_executeSettlement`.
+     *      Reverts on the first non-zero entry.
+     */
+    function _verifyZeroDeltas(AssetDelta[] memory deltas, uint256 count) internal pure {
+        for (uint256 i; i < count;) {
+            if (deltas[i].delta != 0) revert UnbalancedSettlement();
+            unchecked { ++i; }
+        }
+    }
+
+    // ── Virtual hooks ───────────────────────────────────────
+
+    /**
+     * @notice Intent hook — called between pre-actions and post-actions.
+     *
+     * @dev Concrete implementations use this to execute asset conversions
+     *      (DEX swaps, RFQ fills, etc.).  The `deltas` array arrives with
+     *      the accumulated state from pre-actions and MUST be updated to
+     *      reflect any conversion:
+     *
+     *        _updateDelta(deltas, deltaCount, inputToken,  -int256(inputAmount));
+     *        _updateDelta(deltas, deltaCount, outputToken, +int256(outputAmount));
+     *
+     *      The orderData's `settlementData` region is the natural place to
+     *      encode user-signed constraints for the conversion, for example:
+     *
+     *        [20: inputToken][14: maxInput][20: outputToken][14: minOutput]
+     *
+     *      or an oracle address + acceptable price band.
+     *
+     *      If no conversion is needed the implementation returns `deltaCount`
+     *      unchanged and leaves the array untouched — post-actions must then
+     *      fully consume the pre-action deltas on their own.
+     *
+     * @param callerAddress  The order signer.
+     * @param orderData      Full order blob (settlementData at `[offset … offset+length)`).
+     * @param offset         Start of settlementData within orderData.
+     * @param length         Byte length of settlementData (0 = no-op).
+     * @param fillerCalldata Solver-provided payload for the conversion execution.
+     * @param deltas         Per-asset delta array (modified in-place).
+     * @param deltaCount     Current number of unique assets tracked.
+     * @return newDeltaCount Updated count (may grow if the conversion introduces a new asset).
      */
     function _executeIntent(
         address callerAddress,
         bytes memory orderData,
         uint256 offset,
         uint256 length,
-        bytes memory fillerCalldata
-    ) internal virtual;
+        bytes memory fillerCalldata,
+        AssetDelta[] memory deltas,
+        uint256 deltaCount
+    ) internal virtual returns (uint256 newDeltaCount);
 }
