@@ -52,7 +52,7 @@ contract SettlementHarness is SettlementExecutor {
         uint256 lendingOperation,
         uint256 lender,
         bytes memory data
-    ) internal override {
+    ) internal override returns (uint256 amountIn, uint256 amountOut) {
         lendingCalls.push(LendingCall({
             callerAddress: callerAddress,
             asset: asset,

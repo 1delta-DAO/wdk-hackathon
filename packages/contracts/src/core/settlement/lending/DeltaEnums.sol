@@ -26,7 +26,10 @@ library PermitIds {
 }
 
 /**
- * Lender classifier enums, expected to be encoded as uint16
+ * @notice Lender classifier enums defining protocol ID boundaries.
+ * @dev Each value represents an exclusive upper bound. A lender ID is routed to the protocol
+ *      whose UP_TO_* constant is the smallest value greater than the ID.
+ *      Example: lenderId=500 -> Aave V3 (500 < 1000), lenderId=1500 -> Aave V2 (1500 < 2000)
  */
 library LenderIds {
     uint256 internal constant UP_TO_AAVE_V3 = 1000;
@@ -38,7 +41,9 @@ library LenderIds {
 }
 
 /**
- * Operations enums, encoded as uint8
+ * @notice Lending operation type enums, encoded as uint8 in calldata.
+ * @dev DEPOSIT_LENDING_TOKEN and WITHDRAW_LENDING_TOKEN are Morpho-specific operations
+ *      for supplying/withdrawing the loan token (as opposed to collateral).
  */
 library LenderOps {
     uint256 internal constant DEPOSIT = 0;

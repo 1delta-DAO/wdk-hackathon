@@ -6,11 +6,32 @@ import {ERC20Selectors} from "../../selectors/ERC20Selectors.sol";
 import {Masks} from "../../masks/Masks.sol";
 
 /**
- * @notice Settlement lending contract wrapping Morpho Blue with bytes memory for lender params.
- * The data blob contains market params, flags, morpho address, and optional callback data.
+ * @title MorphoSettlementLending
+ * @notice Settlement lending module for Morpho Blue isolated lending markets.
+ * @dev Provides low-level assembly interactions for all Morpho Blue operations including
+ *      supply, borrow, repay, and collateral management. Morpho Blue uses market-specific
+ *      params (loanToken, collateralToken, oracle, irm, lltv) to identify each isolated market.
  *
- * Flags byte at blob offset 96: uses Masks.USE_SHARES_FLAG (bit 126) and Masks.NATIVE_FLAG (bit 127)
- * relative to the 32-byte mload at blob offset 80 (lltv | flags | ...).
+ *      Supported operations:
+ *        - Borrow:               Calls morpho.borrow() on behalf of caller
+ *        - Deposit (lending):    Calls morpho.supply() to supply loan tokens with optional callback
+ *        - Deposit (collateral): Calls morpho.supplyCollateral() with optional callback.
+ *                                Supports Lista native staking via LISTA_PROVIDER_SUPPLY_COLLATERAL
+ *        - Withdraw (collateral):Calls morpho.withdrawCollateral() on behalf of caller
+ *        - Withdraw (lending):   Calls morpho.withdraw() to redeem supply shares
+ *        - Repay:                Calls morpho.repay() with safe-max logic that accrues interest,
+ *                                reads market totals, and caps repayment to exact debt
+ *
+ *      Amount semantics:
+ *        - 0:                       Use contract's current balance (or selfbalance() for native)
+ *        - type(uint112).max:       Use full position balance (reads position() for shares/collateral)
+ *        - any other value:         Use as-is (interpreted as assets or shares based on USE_SHARES_FLAG)
+ *
+ *      Flags byte at blob offset 96:
+ *        - Bit 127 (NATIVE_FLAG):     Asset is native (uses Lista provider for collateral, selfbalance() for amounts)
+ *        - Bit 126 (USE_SHARES_FLAG): Amount parameter represents shares instead of assets
+ *
+ *      Data layout: [20: loanToken][20: collateralToken][20: oracle][20: irm][16: lltv][1: flags][20: morpho][2: calldataLen][calldataLen: calldata]
  */
 abstract contract MorphoSettlementLending is ERC20Selectors, Masks {
     error ListaProviderCallbackNotAllowed();
@@ -53,7 +74,7 @@ abstract contract MorphoSettlementLending is ERC20Selectors, Masks {
         address receiver,
         address callerAddress,
         bytes memory data
-    ) internal {
+    ) internal returns (uint256 amountIn, uint256 amountOut) {
         assembly {
             let ptr := mload(0x40)
             let d := add(data, 0x20)
@@ -88,6 +109,8 @@ abstract contract MorphoSettlementLending is ERC20Selectors, Masks {
                 returndatacopy(0, 0, rdlen)
                 revert(0x0, rdlen)
             }
+
+            amountOut := amount
         }
     }
 
@@ -106,7 +129,7 @@ abstract contract MorphoSettlementLending is ERC20Selectors, Masks {
         address receiver,
         address callerAddress,
         bytes memory data
-    ) internal {
+    ) internal returns (uint256 amountIn, uint256 amountOut) {
         assembly {
             let ptrBase := mload(0x40)
             let ptr := add(128, ptrBase)
@@ -167,6 +190,8 @@ abstract contract MorphoSettlementLending is ERC20Selectors, Masks {
                 returndatacopy(0, 0, rdlen)
                 revert(0x0, rdlen)
             }
+
+            amountIn := amount
         }
     }
 
@@ -185,7 +210,7 @@ abstract contract MorphoSettlementLending is ERC20Selectors, Masks {
         address receiver,
         address callerAddress,
         bytes memory data
-    ) internal {
+    ) internal returns (uint256 amountIn, uint256 amountOut) {
         assembly {
             let ptrBase := mload(0x40)
             let ptr := add(256, ptrBase)
@@ -261,6 +286,8 @@ abstract contract MorphoSettlementLending is ERC20Selectors, Masks {
                     revert(0x0, 0x04)
                 }
             }
+
+            amountIn := amount
         }
     }
 
@@ -278,7 +305,7 @@ abstract contract MorphoSettlementLending is ERC20Selectors, Masks {
         address receiver,
         address callerAddress,
         bytes memory data
-    ) internal {
+    ) internal returns (uint256 amountIn, uint256 amountOut) {
         assembly {
             let ptr := mload(0x40)
             let d := add(data, 0x20)
@@ -299,14 +326,14 @@ abstract contract MorphoSettlementLending is ERC20Selectors, Masks {
             let morpho := shr(96, mload(add(d, 97)))
             let isNative := and(NATIVE_FLAG, lltvAndFlags)
 
-            if eq(amount, 0xffffffffffffffffffffffffffff) {
-                let morphoRead := morpho
-                if isNative {
-                    mstore(0x0, 0x195be17a00000000000000000000000000000000000000000000000000000000) // MOOLAH()
-                    if iszero(staticcall(gas(), morpho, 0x0, 0x04, 0x0, 0x20)) { revert(0x0, 0x0) }
-                    morphoRead := mload(0x0)
-                }
+            let morphoRead := morpho
+            if isNative {
+                mstore(0x0, 0x195be17a00000000000000000000000000000000000000000000000000000000) // MOOLAH()
+                if iszero(staticcall(gas(), morpho, 0x0, 0x04, 0x0, 0x20)) { revert(0x0, 0x0) }
+                morphoRead := mload(0x0)
+            }
 
+            if eq(amount, 0xffffffffffffffffffffffffffff) {
                 let ptrBase := add(ptr, 280)
                 let marketId := keccak256(add(ptr, 4), 160)
                 mstore(ptrBase, MORPHO_POSITION)
@@ -323,6 +350,8 @@ abstract contract MorphoSettlementLending is ERC20Selectors, Masks {
                 returndatacopy(0, 0, rdlen)
                 revert(0x0, rdlen)
             }
+
+            amountOut := amount
         }
     }
 
@@ -340,7 +369,7 @@ abstract contract MorphoSettlementLending is ERC20Selectors, Masks {
         address receiver,
         address callerAddress,
         bytes memory data
-    ) internal {
+    ) internal returns (uint256 amountIn, uint256 amountOut) {
         assembly {
             let ptrBase := mload(0x40)
             let ptr := add(ptrBase, 256)
@@ -388,6 +417,8 @@ abstract contract MorphoSettlementLending is ERC20Selectors, Masks {
                 returndatacopy(0, 0, rdlen)
                 revert(0x0, rdlen)
             }
+
+            amountOut := amount
         }
     }
 
@@ -406,7 +437,7 @@ abstract contract MorphoSettlementLending is ERC20Selectors, Masks {
         address receiver,
         address callerAddress,
         bytes memory data
-    ) internal {
+    ) internal returns (uint256 amountIn, uint256 amountOut) {
         assembly {
             let ptrBase := mload(0x40)
             let ptr := add(ptrBase, 256)
@@ -542,6 +573,8 @@ abstract contract MorphoSettlementLending is ERC20Selectors, Masks {
                 returndatacopy(0, 0, rdlen)
                 revert(0x0, rdlen)
             }
+
+            amountIn := repayAm
         }
     }
 }

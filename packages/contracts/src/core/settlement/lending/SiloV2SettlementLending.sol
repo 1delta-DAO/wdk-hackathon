@@ -8,7 +8,30 @@ import {Masks} from "../../masks/Masks.sol";
 // solhint-disable max-line-length
 
 /**
- * @notice Settlement lending contract wrapping Silo V2 with bytes memory for lender params.
+ * @title SiloV2SettlementLending
+ * @notice Settlement lending module for Silo V2 isolated lending markets.
+ * @dev Provides low-level assembly interactions for deposit, withdraw, borrow, and repay
+ *      operations on Silo V2 vaults. Silo V2 supports multiple collateral types per silo
+ *      (protected vs standard collateral) via a `cType` parameter.
+ *
+ *      Supported operations:
+ *        - Withdraw:  Uses withdraw/redeem with optional collateral type. Max amount uses
+ *                     balanceOf on the silo share token, then redeems all shares
+ *        - Borrow:    Calls silo.borrow() or silo.borrowShares() depending on mode
+ *        - Deposit:   Calls silo.deposit() or silo.depositWithCollateralType() depending on cType
+ *        - Repay:     Calls silo.repay(). Safe max uses silo.maxRepay() to cap the amount
+ *
+ *      Amount semantics:
+ *        - 0:                       Use contract's current balance of the asset
+ *        - type(uint112).max:       Use caller's full silo share balance (for withdraw) or
+ *                                   min(contractBalance, maxRepay) for repay
+ *        - any other value:         Use as-is
+ *
+ *      Collateral types (cType):
+ *        - 0: Protected collateral (uses extended selectors with collateral type param)
+ *        - 1: Standard collateral (uses base ERC4626 selectors)
+ *
+ *      Data layout: [1: cType/mode][20: silo] for withdraw/borrow/deposit, [20: silo] for repay
  */
 abstract contract SiloV2SettlementLending is ERC20Selectors, Masks {
     bytes32 private constant WITHDRAW = 0xb460af9400000000000000000000000000000000000000000000000000000000;
@@ -30,7 +53,7 @@ abstract contract SiloV2SettlementLending is ERC20Selectors, Masks {
         address receiver,
         address callerAddress,
         bytes memory data
-    ) internal {
+    ) internal returns (uint256 amountIn, uint256 amountOut) {
         assembly {
             let ptr := mload(0x40)
             let d := add(data, 0x20)
@@ -91,6 +114,8 @@ abstract contract SiloV2SettlementLending is ERC20Selectors, Masks {
                     }
                 }
             }
+
+            amountOut := amount
         }
     }
 
@@ -110,7 +135,7 @@ abstract contract SiloV2SettlementLending is ERC20Selectors, Masks {
         address receiver,
         address callerAddress,
         bytes memory data
-    ) internal {
+    ) internal returns (uint256 amountIn, uint256 amountOut) {
         assembly {
             let d := add(data, 0x20)
             let mode := shr(248, mload(d))
@@ -133,6 +158,8 @@ abstract contract SiloV2SettlementLending is ERC20Selectors, Masks {
                 returndatacopy(0x0, 0x0, returndatasize())
                 revert(0x0, returndatasize())
             }
+
+            amountOut := amount
         }
     }
 
@@ -151,7 +178,7 @@ abstract contract SiloV2SettlementLending is ERC20Selectors, Masks {
         uint256 amount,
         address receiver,
         bytes memory data
-    ) internal {
+    ) internal returns (uint256 amountIn, uint256 amountOut) {
         assembly {
             let d := add(data, 0x20)
             let cType := shr(248, mload(d))
@@ -188,6 +215,8 @@ abstract contract SiloV2SettlementLending is ERC20Selectors, Masks {
                     revert(0x0, returndatasize())
                 }
             }
+
+            amountIn := amount
         }
     }
 
@@ -206,7 +235,7 @@ abstract contract SiloV2SettlementLending is ERC20Selectors, Masks {
         uint256 amount,
         address receiver,
         bytes memory data
-    ) internal {
+    ) internal returns (uint256 amountIn, uint256 amountOut) {
         assembly {
             function _balanceOf(t, u) -> b {
                 mstore(0, ERC20_BALANCE_OF)
@@ -243,6 +272,8 @@ abstract contract SiloV2SettlementLending is ERC20Selectors, Masks {
                 returndatacopy(0x0, 0x0, returndatasize())
                 revert(0x0, returndatasize())
             }
+
+            amountIn := amount
         }
     }
 }

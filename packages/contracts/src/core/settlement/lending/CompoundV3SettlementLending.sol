@@ -8,7 +8,26 @@ import {Masks} from "../../masks/Masks.sol";
 // solhint-disable max-line-length
 
 /**
- * @notice Settlement lending contract wrapping Compound V3 with bytes memory for lender params.
+ * @title CompoundV3SettlementLending
+ * @notice Settlement lending module for Compound V3 (Comet) protocol.
+ * @dev Provides low-level assembly interactions for deposit, withdraw, borrow, and repay
+ *      operations on Compound V3 Comet markets. Compound V3 unifies lending and borrowing
+ *      into a single Comet contract per market.
+ *
+ *      Supported operations:
+ *        - Withdraw:  Calls comet.withdrawFrom() on behalf of caller. Supports both base asset
+ *                     (via balanceOf) and collateral asset (via userCollateral) for max amount
+ *        - Borrow:    Calls comet.withdrawFrom() (borrowing in V3 is a withdraw of the base asset)
+ *        - Deposit:   Calls comet.supplyTo() to supply assets on behalf of receiver
+ *        - Repay:     Calls comet.supplyTo() (repaying in V3 is a supply of the base asset).
+ *                     Safe max repay uses borrowBalanceOf() to cap the amount
+ *
+ *      Amount semantics:
+ *        - 0:                       Use contract's current balance of the asset
+ *        - type(uint112).max:       Use caller's full balance (base via balanceOf, collateral via userCollateral)
+ *        - any other value:         Use as-is
+ *
+ *      Data layout: [1: isBase][20: comet] for withdraw, [20: comet] for borrow/deposit/repay
  */
 abstract contract CompoundV3SettlementLending is ERC20Selectors, Masks {
     /**
@@ -25,7 +44,7 @@ abstract contract CompoundV3SettlementLending is ERC20Selectors, Masks {
         address receiver,
         address callerAddress,
         bytes memory data
-    ) internal {
+    ) internal returns (uint256 amountIn, uint256 amountOut) {
         assembly {
             let ptr := mload(0x40)
             let d := add(data, 0x20)
@@ -67,6 +86,8 @@ abstract contract CompoundV3SettlementLending is ERC20Selectors, Masks {
                 returndatacopy(0x0, 0x0, returndatasize())
                 revert(0x0, returndatasize())
             }
+
+            amountOut := amount
         }
     }
 
@@ -84,7 +105,7 @@ abstract contract CompoundV3SettlementLending is ERC20Selectors, Masks {
         address receiver,
         address callerAddress,
         bytes memory data
-    ) internal {
+    ) internal returns (uint256 amountIn, uint256 amountOut) {
         assembly {
             let ptr := mload(0x40)
             let cometPool := shr(96, mload(add(data, 0x20)))
@@ -99,6 +120,8 @@ abstract contract CompoundV3SettlementLending is ERC20Selectors, Masks {
                 returndatacopy(0x0, 0x0, returndatasize())
                 revert(0x0, returndatasize())
             }
+
+            amountOut := amount
         }
     }
 
@@ -114,7 +137,7 @@ abstract contract CompoundV3SettlementLending is ERC20Selectors, Masks {
         uint256 amount,
         address receiver,
         bytes memory data
-    ) internal {
+    ) internal returns (uint256 amountIn, uint256 amountOut) {
         assembly {
             let comet := shr(96, mload(add(data, 0x20)))
 
@@ -138,6 +161,8 @@ abstract contract CompoundV3SettlementLending is ERC20Selectors, Masks {
                 returndatacopy(0x0, 0x0, returndatasize())
                 revert(0x0, returndatasize())
             }
+
+            amountIn := amount
         }
     }
 
@@ -153,7 +178,7 @@ abstract contract CompoundV3SettlementLending is ERC20Selectors, Masks {
         uint256 amount,
         address receiver,
         bytes memory data
-    ) internal {
+    ) internal returns (uint256 amountIn, uint256 amountOut) {
         assembly {
             let comet := shr(96, mload(add(data, 0x20)))
 
@@ -197,6 +222,8 @@ abstract contract CompoundV3SettlementLending is ERC20Selectors, Masks {
                 returndatacopy(0x0, 0x0, returndatasize())
                 revert(0x0, returndatasize())
             }
+
+            amountIn := amount
         }
     }
 }

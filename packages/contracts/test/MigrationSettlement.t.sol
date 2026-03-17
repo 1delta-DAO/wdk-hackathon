@@ -56,7 +56,7 @@ contract MigrationTestHarness is MigrationSettlement {
         uint256 lendingOperation,
         uint256 lender,
         bytes memory data
-    ) internal override {
+    ) internal override returns (uint256 amountIn, uint256 amountOut) {
         _calls.push(LendingCall({
             callerAddress: callerAddress,
             asset: asset,

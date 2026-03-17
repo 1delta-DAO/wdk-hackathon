@@ -8,7 +8,29 @@ import {Masks} from "../../masks/Masks.sol";
 // solhint-disable max-line-length
 
 /**
- * @notice Settlement lending contract wrapping Compound V2 with bytes memory for lender params.
+ * @title CompoundV2SettlementLending
+ * @notice Settlement lending module for Compound V2 and compatible forks (e.g. Venus, Iron Bank, dForce iTokens).
+ * @dev Provides low-level assembly interactions for deposit, withdraw, borrow, and repay
+ *      operations on Compound V2-style cToken markets. Supports multiple mint/redeem selector
+ *      variants via a `selectorId` byte to accommodate protocol forks with different function signatures.
+ *
+ *      Supported operations:
+ *        - Borrow:    Calls cToken.borrowBehalf(), optionally forwards tokens to receiver
+ *        - Withdraw:  Converts underlying amount to cToken shares via exchangeRateCurrent(),
+ *                     then redeems via redeem/redeemBehalf/redeem(address,uint) depending on selectorId
+ *        - Deposit:   Mints cTokens via mintBehalf/mint(uint)/mint(address,uint) depending on selectorId.
+ *                     Handles native ETH deposits (cETH) with value-bearing calls
+ *        - Repay:     Calls repayBorrowBehalf() for both native and ERC20 assets
+ *
+ *      Amount semantics:
+ *        - 0:                       Use contract's current balance (or selfbalance() for native)
+ *        - type(uint112).max:       Use caller's full balance (max withdraw via balanceOfUnderlying, safe max repay via borrowBalanceCurrent)
+ *        - any other value:         Use as-is
+ *
+ *      selectorId variants (for deposit/withdraw):
+ *        - 0: mintBehalf / transferFrom+redeem (standard Compound V2)
+ *        - 1: mint(uint) / redeemBehalf (forks with behalf support)
+ *        - 2: mint(address,uint) / redeem(address,uint) (iToken-style forks like dForce)
  */
 abstract contract CompoundV2SettlementLending is ERC20Selectors, Masks {
     // NativeTransferFailed()
@@ -28,7 +50,7 @@ abstract contract CompoundV2SettlementLending is ERC20Selectors, Masks {
         address receiver,
         address callerAddress,
         bytes memory data
-    ) internal {
+    ) internal returns (uint256 amountIn, uint256 amountOut) {
         assembly {
             let ptr := mload(0x40)
             let cToken := shr(96, mload(add(data, 0x20)))
@@ -64,6 +86,8 @@ abstract contract CompoundV2SettlementLending is ERC20Selectors, Masks {
                     revert(0, rdsize)
                 }
             }
+
+            amountOut := amount
         }
     }
 
@@ -81,7 +105,7 @@ abstract contract CompoundV2SettlementLending is ERC20Selectors, Masks {
         address receiver,
         address callerAddress,
         bytes memory data
-    ) internal {
+    ) internal returns (uint256 amountIn, uint256 amountOut) {
         assembly {
             let ptr := mload(0x40)
             let d := add(data, 0x20)
@@ -198,6 +222,8 @@ abstract contract CompoundV2SettlementLending is ERC20Selectors, Masks {
                     }
                 }
             }
+
+            amountOut := amount
         }
     }
 
@@ -213,7 +239,7 @@ abstract contract CompoundV2SettlementLending is ERC20Selectors, Masks {
         uint256 amount,
         address receiver,
         bytes memory data
-    ) internal {
+    ) internal returns (uint256 amountIn, uint256 amountOut) {
         assembly {
             let d := add(data, 0x20)
             let selectorId := shr(248, mload(d))
@@ -350,6 +376,8 @@ abstract contract CompoundV2SettlementLending is ERC20Selectors, Masks {
                 }
                 default { revert(0, 0) }
             }
+
+            amountIn := amount
         }
     }
 
@@ -365,7 +393,7 @@ abstract contract CompoundV2SettlementLending is ERC20Selectors, Masks {
         uint256 amount,
         address receiver,
         bytes memory data
-    ) internal {
+    ) internal returns (uint256 amountIn, uint256 amountOut) {
         assembly {
             let cToken := shr(96, mload(add(data, 0x20)))
             let ptr := mload(0x40)
@@ -380,8 +408,8 @@ abstract contract CompoundV2SettlementLending is ERC20Selectors, Masks {
                     mstore(0, 0x17bfdfbc00000000000000000000000000000000000000000000000000000000)
                     mstore(0x04, receiver)
                     pop(call(gas(), cToken, 0x0, 0x0, 0x24, 0x0, 0x20))
-                    let borrowBal := mload(0x0)
-                    if lt(borrowBal, amount) { amount := borrowBal }
+                    let borrowBa := mload(0x0)
+                    if lt(borrowBa, amount) { amount := borrowBa }
                 }
 
                 // repayBorrowBehalf(address)
@@ -433,6 +461,8 @@ abstract contract CompoundV2SettlementLending is ERC20Selectors, Masks {
                     revert(0, rdsize)
                 }
             }
+
+            amountIn := amount
         }
     }
 }

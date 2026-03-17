@@ -8,8 +8,25 @@ import {Masks} from "../../masks/Masks.sol";
 // solhint-disable max-line-length
 
 /**
- * @notice Settlement lending contract wrapping Aave lenders with bytes memory for lender params.
- * Asset, amount, and receiver are explicit parameters. Lender-specific data is passed as bytes memory.
+ * @title AaveSettlementLending
+ * @notice Settlement lending module for Aave V2 and V3 protocols.
+ * @dev Provides low-level assembly interactions for deposit, withdraw, borrow, and repay
+ *      operations on Aave lending pools. All lender-specific parameters (pool address, aToken,
+ *      debtToken, interest rate mode) are encoded in a tightly-packed `bytes memory` blob.
+ *
+ *      Supported operations:
+ *        - Withdraw:    Pulls aTokens from caller via transferFrom, calls pool.withdraw()
+ *        - Borrow:      Calls pool.borrow() on behalf of caller, optionally forwards tokens to receiver
+ *        - Deposit V3:  Calls pool.supply() (Aave V3 interface)
+ *        - Deposit V2:  Calls pool.deposit() (Aave V2 interface)
+ *        - Repay:       Calls pool.repay() with mode-dependent selector (V2 vs V3)
+ *
+ *      Amount semantics:
+ *        - 0:                       Use contract's current balance of the asset
+ *        - type(uint112).max:       Use caller's full aToken/debtToken balance (max withdraw/repay)
+ *        - any other value:         Use as-is
+ *
+ *      Data layout per function is documented in the respective function NatSpec.
  */
 abstract contract AaveSettlementLending is ERC20Selectors, Masks {
     /**
@@ -19,6 +36,8 @@ abstract contract AaveSettlementLending is ERC20Selectors, Masks {
      * @param receiver The address to receive withdrawn tokens
      * @param callerAddress Address of the caller
      * @param data Lender-specific data: [20: aToken][20: pool]
+     * @return amountIn Always 0 for withdrawals
+     * @return amountOut The actual amount withdrawn (resolved from max if applicable)
      */
     function _withdrawFromAave(
         address asset,
@@ -26,7 +45,7 @@ abstract contract AaveSettlementLending is ERC20Selectors, Masks {
         address receiver,
         address callerAddress,
         bytes memory data
-    ) internal {
+    ) internal returns (uint256 amountIn, uint256 amountOut) {
         assembly {
             let ptr := mload(0x40)
             let d := add(data, 0x20)
@@ -77,6 +96,8 @@ abstract contract AaveSettlementLending is ERC20Selectors, Masks {
                 returndatacopy(0x0, 0x0, returndatasize())
                 revert(0x0, returndatasize())
             }
+
+            amountOut := amount
         }
     }
 
@@ -87,6 +108,8 @@ abstract contract AaveSettlementLending is ERC20Selectors, Masks {
      * @param receiver The address to receive borrowed tokens
      * @param callerAddress Address of the caller
      * @param data Lender-specific data: [1: mode][20: pool]
+     * @return amountIn Always 0 for borrows
+     * @return amountOut The amount borrowed
      */
     function _borrowFromAave(
         address asset,
@@ -94,7 +117,7 @@ abstract contract AaveSettlementLending is ERC20Selectors, Masks {
         address receiver,
         address callerAddress,
         bytes memory data
-    ) internal {
+    ) internal returns (uint256 amountIn, uint256 amountOut) {
         assembly {
             let d := add(data, 0x20)
             let mode := shr(248, mload(d))
@@ -148,6 +171,8 @@ abstract contract AaveSettlementLending is ERC20Selectors, Masks {
                     revert(0, rdsize)
                 }
             }
+
+            amountOut := amount
         }
     }
 
@@ -157,13 +182,15 @@ abstract contract AaveSettlementLending is ERC20Selectors, Masks {
      * @param amount The amount to deposit (0 = contract balance)
      * @param receiver The address to receive aTokens
      * @param data Lender-specific data: [20: pool]
+     * @return amountIn The actual amount deposited (resolved from 0 if applicable)
+     * @return amountOut Always 0 for deposits
      */
     function _depositToAaveV3(
         address asset,
         uint256 amount,
         address receiver,
         bytes memory data
-    ) internal {
+    ) internal returns (uint256 amountIn, uint256 amountOut) {
         assembly {
             let pool := shr(96, mload(add(data, 0x20)))
 
@@ -188,6 +215,8 @@ abstract contract AaveSettlementLending is ERC20Selectors, Masks {
                 returndatacopy(0x0, 0x0, returndatasize())
                 revert(0x0, returndatasize())
             }
+
+            amountIn := amount
         }
     }
 
@@ -197,13 +226,15 @@ abstract contract AaveSettlementLending is ERC20Selectors, Masks {
      * @param amount The amount to deposit (0 = contract balance)
      * @param receiver The address to receive aTokens
      * @param data Lender-specific data: [20: pool]
+     * @return amountIn The actual amount deposited (resolved from 0 if applicable)
+     * @return amountOut Always 0 for deposits
      */
     function _depositToAaveV2(
         address asset,
         uint256 amount,
         address receiver,
         bytes memory data
-    ) internal {
+    ) internal returns (uint256 amountIn, uint256 amountOut) {
         assembly {
             let pool := shr(96, mload(add(data, 0x20)))
 
@@ -228,6 +259,8 @@ abstract contract AaveSettlementLending is ERC20Selectors, Masks {
                 returndatacopy(0x0, 0x0, returndatasize())
                 revert(0x0, returndatasize())
             }
+
+            amountIn := amount
         }
     }
 
@@ -237,13 +270,15 @@ abstract contract AaveSettlementLending is ERC20Selectors, Masks {
      * @param amount The amount to repay (0 = contract balance, type(uint112).max = safe max)
      * @param receiver The borrower address (on behalf of)
      * @param data Lender-specific data: [1: mode][20: debtToken][20: pool]
+     * @return amountIn The actual amount repaid (resolved from max/0 if applicable)
+     * @return amountOut Always 0 for repayments
      */
     function _repayToAave(
         address asset,
         uint256 amount,
         address receiver,
         bytes memory data
-    ) internal {
+    ) internal returns (uint256 amountIn, uint256 amountOut) {
         assembly {
             let d := add(data, 0x20)
             let mode := shr(248, mload(d))
@@ -304,6 +339,8 @@ abstract contract AaveSettlementLending is ERC20Selectors, Masks {
                     revert(0x0, returndatasize())
                 }
             }
+
+            amountIn := amount
         }
     }
 }
