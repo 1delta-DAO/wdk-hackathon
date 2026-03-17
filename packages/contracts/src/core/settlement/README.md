@@ -1,68 +1,67 @@
-# Settlement Executor — Merkle-Verified Lending Actions
+# Settlement System
 
-## Overview
-
-The settlement system enables intent-based lending position management across multiple protocols (Aave V2/V3, Compound V2/V3, Morpho Blue, Silo V2). A user signs an order that defines **which** lending actions are permitted. A solver then fills the order by choosing **which** of those approved actions to execute, and with **what** amounts/assets/receivers.
-
-The key insight: the user's order is compact (a single merkle root), while the solver has full autonomy to pick the optimal execution path from the approved action set.
+A gas-efficient, merkle-tree-based intent settlement system for DeFi lending operations.
 
 ## Architecture
 
 ```
-┌──────────────────────────────────────────────────┐
-│                  Flash Loan Provider              │
-│              (Morpho Blue / Moolah)               │
-└──────────────────┬───────────────────────────────┘
-                   │ callback
-                   ▼
-┌──────────────────────────────────────────────────┐
-│        MorphoSettlementCallback                   │
-│        MoolahSettlementCallback                   │
-│  - validates caller                               │
-│  - extracts origCaller, orderData, executionData  │
-└──────────────────┬───────────────────────────────┘
-                   │
-                   ▼
-┌──────────────────────────────────────────────────┐
-│             SettlementExecutor                    │
-│  1. pre-actions  (merkle-verified lending ops)    │
-│  2. intent       (virtual — swap/fill logic)      │
-│  3. post-actions (merkle-verified lending ops)    │
-└──────────────────┬───────────────────────────────┘
-                   │
-                   ▼
-┌──────────────────────────────────────────────────┐
-│         UniversalSettlementLending                │
-│  dispatches to per-lender contracts:              │
-│  Aave, Compound, Morpho, Silo                    │
-└──────────────────────────────────────────────────┘
+Settlement.sol (external API)
+  ├── settle()                         — direct settlement
+  ├── settleWithFlashLoan()            — flash-loan-wrapped settlement
+  │
+  ├── SettlementExecutor.sol           — merkle-verified action dispatch
+  │   ├── _executeSettlement()         — orchestrates pre → intent → post
+  │   ├── _executeActions()            — loops actions, verifies proofs
+  │   └── _executeIntent()             — swap via forwarder
+  │
+  ├── MorphoSettlementCallback.sol     — Morpho Blue flash loan callback
+  ├── MoolahSettlementCallback.sol     — Lista DAO flash loan callback
+  ├── MorphoFlashLoans (Morpho.sol)    — flash loan initiator
+  │
+  ├── lending/
+  │   ├── UniversalSettlementLending   — routes to per-lender contracts
+  │   ├── AaveSettlementLending        — Aave V2/V3
+  │   ├── CompoundV2SettlementLending  — Compound V2 / Venus
+  │   ├── CompoundV3SettlementLending  — Compound V3
+  │   ├── MorphoSettlementLending      — Morpho Blue
+  │   └── SiloV2SettlementLending      — Silo V2
+  │
+  └── SettlementForwarder.sol          — isolated execution sandbox
 ```
 
-## Merkle Tree Design
+## Merkle-Based Action Verification
 
-### What the user signs
+Users sign an order containing a **merkle root** of all lending actions they approve. Solvers choose which actions to execute and provide merkle proofs.
 
-Each action the user approves becomes a leaf in a merkle tree:
+### Why Merkle Trees?
+
+- **User flexibility**: Approve migration to any of N lenders in a single signature
+- **Solver autonomy**: Solver picks the best destination(s) based on current rates/liquidity
+- **Compact orders**: Order size is constant (32-byte root) regardless of how many actions are approved
+- **Security**: Only user-approved action configurations can execute
+
+### Leaf Construction
+
+Each leaf represents an approved action configuration:
 
 ```
-leaf = keccak256(op ‖ lender ‖ lenderData)
+leaf = keccak256(abi.encodePacked(uint8 op, uint16 lender, bytes lenderData))
 ```
 
-Where:
-- `op` (1 byte) — lending operation: deposit(0), borrow(1), repay(2), withdraw(3), etc.
-- `lender` (2 bytes) — lender identifier (Aave V3 < 1000, Aave V2 < 2000, Compound V3 < 3000, etc.)
-- `lenderData` (variable) — protocol-specific params (pool address, market params, cToken, etc.)
+- `op`: lending operation (0=deposit, 1=borrow, 2=repay, 3=withdraw, 4=deposit_lending_token, 5=withdraw_lending_token)
+- `lender`: lender ID (Aave V3 < 1000, Aave V2 < 2000, Compound V3 < 3000, Compound V2 < 4000, Morpho < 5000, Silo V2 < 6000)
+- `lenderData`: protocol-specific parameters (pool address, market params, cToken, etc.)
 
-The user's signed order contains only the **merkle root** — a single `bytes32` regardless of how many actions are approved.
+### Proof Verification (sorted-pair hashing)
 
-### What the solver provides
+```
+if leaf < sibling:
+    node = keccak256(leaf, sibling)
+else:
+    node = keccak256(sibling, leaf)
+```
 
-For each action the solver wants to execute, they supply:
-- The **variable params**: asset, amount, receiver
-- The **action config**: op, lender, lenderData (must match an approved leaf)
-- A **merkle proof**: sibling hashes proving the action is in the tree
-
-The executor verifies the proof on-chain before dispatching.
+Repeat up the tree until the computed root matches the signed root.
 
 ### Example: User approves 4 destination lenders
 
@@ -91,6 +90,11 @@ The order stores just `root` (32 bytes). The solver picks e.g. Leaf 2 (best rate
 [variable: settlementData]
 ```
 
+`settlementData` encodes intent parameters:
+```
+[20: inputToken][14: inputAmount][20: outputToken][14: minOutputAmount]
+```
+
 Fixed overhead: 34 bytes + settlement params. The merkle root covers arbitrarily many approved actions.
 
 ### Execution Data (solver-provided)
@@ -110,8 +114,15 @@ Fixed overhead: 34 bytes + settlement params. The merkle root covers arbitrarily
     │ [N bytes: lenderData]                  │
     ├─ merkle proof ─────────────────────────┤
     │ [1 byte:  proofLength]                 │
-    │ [proofLength × 32 bytes: proof nodes]  │
+    │ [proofLength x 32 bytes: proof nodes]  │
     └────────────────────────────────────────┘
+```
+
+### Filler Calldata (solver's DEX/swap calldata)
+
+```
+[20: target (address)]
+[remaining: calldata to forward to target]
 ```
 
 ### Amount Encoding
@@ -120,24 +131,55 @@ Amounts use `uint112` (14 bytes) with sentinel values:
 - `0` — use the contract's current balance of the asset
 - `type(uint112).max` — protocol-specific "safe max" (e.g., full user balance)
 
-## Execution Flow
+## Settlement Flows
+
+### 1. Direct Settlement (`settle`)
+
+For operations that don't need flash loans (e.g., withdraw -> swap -> deposit):
 
 ```
-1. Flash loan provider calls back into the settlement contract
-2. Callback validates caller, extracts origCaller from calldata
-3. Callback copies orderData and executionData into memory
-4. _executeSettlement is called:
-   a. Parse merkleRoot from orderData
-   b. Parse numPre, numPost from executionData
-   c. For each pre-action:
-      - Parse (asset, amount, receiver) from executionData
-      - Parse (op, lender, lenderData) from executionData
-      - Compute leaf hash, verify merkle proof against root
-      - Dispatch via _lendingOperations
-   d. Call _executeIntent (virtual — swap/fill)
-   e. For each post-action: same as (c)
-5. Flash loan repayment occurs naturally from contract balance
+Solver calls settle(callerAddress, orderData, executionData, fillerCalldata)
+  -> pre-actions (merkle-verified lending ops)
+  -> intent (swap via forwarder)
+  -> post-actions (merkle-verified lending ops)
 ```
+
+### 2. Flash-Loan Settlement (`settleWithFlashLoan`)
+
+For operations requiring upfront capital (e.g., leverage loops, migrations):
+
+```
+Solver calls settleWithFlashLoan(callerAddress, asset, amount, pool, poolId, orderData, executionData, fillerCalldata)
+  -> morphoFlashLoan(asset, amount, ...)
+    -> callback: onMorphoFlashLoan
+      -> pre-actions
+      -> intent (swap via forwarder)
+      -> post-actions
+  -> flash loan repayment (automatic)
+```
+
+### Flash Loan Callback Data Layout
+
+```
+[20: origCaller][1: poolId]
+[2: orderDataLen][orderData]
+[2: fillerCalldataLen][fillerCalldata]
+[remaining: executionData]
+```
+
+## Forwarder Security Model
+
+The `SettlementForwarder` contract provides an isolated execution context for solver-provided calldata:
+
+- **No token approvals**: The forwarder holds no approvals, so malicious calldata cannot call `transferFrom` to drain user funds
+- **Restricted access**: `execute()` and `sweep()` are only callable by the Settlement contract
+- **Stateless**: No storage, no persistent balances — tokens flow through transiently
+
+Intent execution flow:
+1. Settlement contract transfers input tokens to forwarder
+2. Forwarder executes solver's calldata (e.g., DEX swap)
+3. Settlement contract calls `forwarder.sweep(outputToken)` to pull results back
+4. Settlement contract verifies `balAfter - balBefore >= minOutputAmount`
 
 ## Lender Data Formats
 
@@ -156,67 +198,64 @@ Amounts use `uint112` (14 bytes) with sentinel values:
 | Morpho | borrow/withdraw | `[20: loan][20: coll][20: oracle][20: irm][16: lltv][1: flags][20: morpho]` | 117 |
 | Morpho | deposit/repay | above + `[2: cbLen][cbLen: cbData]` | 119+ |
 
-## Use Cases
+## Example: Position Migration
 
-### Leverage Loop
+User has a borrow position on Compound V3 and wants to allow migration to any of Aave V3, Morpho Blue, or Silo V2.
 
-User wants to lever up on Aave — approves deposit + borrow actions:
+**Order** (signed once):
+- Merkle tree with 6 leaves:
+  - `repay(Compound V3, comet)` — repay existing debt
+  - `withdraw(Compound V3, comet)` — withdraw collateral
+  - `deposit(Aave V3, pool)` — deposit to Aave
+  - `borrow(Aave V3, mode + pool)` — borrow from Aave
+  - `deposit(Morpho, marketParams)` — deposit to Morpho
+  - `borrow(Morpho, marketParams)` — borrow from Morpho
+- `settlementData` = swap parameters
+- Order contains just the 32-byte merkle root
 
+**Execution** (solver picks best destination):
 ```
-Pre:  deposit USDC collateral on Aave
-Intent: swap ETH → USDC (repay flash loan)
-Post: borrow ETH from Aave
-```
-
-### Cross-Protocol Migration
-
-User wants to move a position from Compound to the best available lender:
-
-```
-Approved leaves:
-  - withdraw from Compound V3
-  - repay on Compound V3
-  - deposit on Aave V3 pool A
-  - deposit on Morpho market B
-  - deposit on Silo pool C
-  - borrow on Aave V3 pool A
-  - borrow on Morpho market B
-  - borrow on Silo pool C
-
-Solver picks Morpho (best rate today):
-  Pre:  repay debt on Compound, withdraw collateral from Compound
-  Intent: swap if assets differ
-  Post: deposit collateral on Morpho, borrow on Morpho
+settleWithFlashLoan(user, USDC, 10000e6, morphoPool, 0, orderData, executionData, dexSwapCalldata)
 ```
 
-The user signed once. The solver optimizes autonomously.
+Solver chooses Aave (best rate today):
+1. Flash loan USDC
+2. Pre-action: repay Compound debt (proof verified)
+3. Pre-action: withdraw Compound collateral (proof verified)
+4. Intent: swap collateral if needed (via forwarder)
+5. Post-action: deposit collateral to Aave (proof verified)
+6. Post-action: borrow USDC from Aave to repay flash loan (proof verified)
+
+Tomorrow, rates change — solver picks Morpho instead, using the same signed order with different proofs.
 
 ## Gas Characteristics
 
 - Merkle proof verification: ~2,100 gas per proof element (one `keccak256` + comparison)
-- Typical proof depth: 2–3 elements for 4–8 approved actions
-- Proof overhead per action: ~4,200–6,300 gas
-- Lending protocol calls: 50,000–200,000 gas each (dominates total cost)
+- Typical proof depth: 2-3 elements for 4-8 approved actions
+- Proof overhead per action: ~4,200-6,300 gas
+- Lending protocol calls: 50,000-200,000 gas each (dominates total cost)
 - Merkle overhead is <5% of total execution cost
 
 ## Files
 
 ```
 settlement/
-├── SettlementExecutor.sol              Core executor with merkle verification
+├── Settlement.sol                     Concrete contract with external API
+├── SettlementExecutor.sol             Core executor with merkle verification
+├── SettlementForwarder.sol            Isolated execution sandbox
 ├── lending/
-│   ├── UniversalSettlementLending.sol  Lending operation dispatcher
-│   ├── AaveSettlementLending.sol       Aave V2/V3 operations
+│   ├── UniversalSettlementLending.sol Lending operation dispatcher
+│   ├── AaveSettlementLending.sol      Aave V2/V3 operations
 │   ├── CompoundV2SettlementLending.sol Compound V2 operations
 │   ├── CompoundV3SettlementLending.sol Compound V3 operations
-│   ├── MorphoSettlementLending.sol     Morpho Blue operations
-│   ├── SiloV2SettlementLending.sol     Silo V2 operations
-│   └── DeltaEnums.sol                  Enum definitions
+│   ├── MorphoSettlementLending.sol    Morpho Blue operations
+│   ├── SiloV2SettlementLending.sol    Silo V2 operations
+│   └── DeltaEnums.sol                 Enum definitions
 ├── flash-loan/
-│   ├── Morpho.sol                      Flash loan initiator
-│   ├── MorphoSettlementCallback.sol    Morpho callback → executor
-│   ├── MoolahSettlementCallback.sol    Moolah callback → executor
-│   ├── MorphoCallback.sol              Legacy generic callback
-│   └── MoolahCallback.sol              Legacy generic callback
+│   ├── Morpho.sol                     Flash loan initiator
+│   ├── MorphoSettlementCallback.sol   Morpho callback -> executor
+│   ├── MoolahSettlementCallback.sol   Moolah callback -> executor
+│   ├── MorphoCallback.sol             Legacy generic callback
+│   └── MoolahCallback.sol             Legacy generic callback
 └── README.md
 ```
