@@ -24,9 +24,13 @@ import {UniversalSettlementLending} from "./lending/UniversalSettlementLending.s
  *    • delta > 0, totalBorrowed > 0 → borrow surplus = fee
  *        Verified: surplus × 1e7 ≤ totalBorrowed × maxFeeBps
  *        Transferred to feeRecipient.
- *    • delta > 0, totalBorrowed == 0 → non-borrow surplus → revert
- *    • delta < 0 → deficit → revert
- *    • delta == 0 → balanced → ok
+ *    • delta > 0, totalBorrowed == 0 → non-borrow surplus → refund to signer
+ *    • delta < 0                     → deficit → revert (UnbalancedSettlement)
+ *    • delta == 0                    → balanced → ok
+ *
+ *  The refund covers the case where a swap output exceeds the debt being
+ *  repaid — min(balance, debt) caps the repay, and the leftover is sent
+ *  back to the signer.
  *
  *  Example with maxFeeBps = 50 000 (0.5%), borrow 1000 USDC:
  *    max fee = 1000 × 50 000 / 1e7 = 5 USDC
@@ -159,8 +163,8 @@ abstract contract SettlementExecutor is UniversalSettlementLending {
             callerAddress, merkleRoot, executionData, execOffset, numPost, deltas, deltaCount
         );
 
-        // ── Stage 4 + 5: sweep borrow fees, reject everything else ──
-        _sweepFeesAndVerify(deltas, deltaCount, feeRecipient, maxFeeBps);
+        // ── Stage 4 + 5: refund excess to signer, sweep borrow fees, verify ──
+        _sweepAndVerify(deltas, deltaCount, callerAddress, feeRecipient, maxFeeBps);
     }
 
     // ── Merkle-verified action batch ────────────────────────
@@ -291,19 +295,28 @@ abstract contract SettlementExecutor is UniversalSettlementLending {
     }
 
     /**
-     * @notice Sweep borrow-surplus fees (percentage-checked) and verify all deltas resolve.
+     * @notice Refund non-borrow surplus to signer, sweep borrow-surplus as fee,
+     *         and verify all deltas resolve to zero.
      *
      * @dev For each tracked asset:
-     *        delta > 0, totalBorrowed > 0 → fee check:
-     *            surplus × 10 000 ≤ totalBorrowed × maxFeeBps
-     *            If passes, transfer surplus to feeRecipient.
-     *        delta > 0, totalBorrowed == 0 → revert (non-borrow surplus)
-     *        delta < 0 → revert (deficit)
-     *        delta == 0 → ok
+     *
+     *        delta > 0, totalBorrowed > 0 → borrow surplus = solver fee
+     *            Percentage-checked: surplus × 1e7 ≤ totalBorrowed × maxFeeBps
+     *            Transferred to feeRecipient.
+     *
+     *        delta > 0, totalBorrowed == 0 → non-borrow surplus (e.g. repay excess)
+     *            Refunded to the signer (callerAddress).
+     *            This covers the case where a swap output exceeds the debt being
+     *            repaid — min(balance, debt) caps the repay, and the leftover
+     *            belongs to the user.
+     *
+     *        delta < 0 → deficit → revert (UnbalancedSettlement)
+     *        delta == 0 → balanced → ok
      */
-    function _sweepFeesAndVerify(
+    function _sweepAndVerify(
         AssetDelta[] memory deltas,
         uint256 count,
+        address callerAddress,
         address feeRecipient,
         uint256 maxFeeBps
     ) private {
@@ -318,17 +331,18 @@ abstract contract SettlementExecutor is UniversalSettlementLending {
                 uint256 surplus = uint256(d);
                 uint256 borrowed = deltas[i].totalBorrowed;
 
-                // Surplus only allowed on assets that were borrowed
-                if (borrowed == 0) revert UnbalancedSettlement();
-
-                // Percentage check: surplus / borrowed ≤ maxFeeBps / FEE_DENOMINATOR
-                // Rearranged to avoid division: surplus × FEE_DENOMINATOR ≤ borrowed × maxFeeBps
-                if (surplus * FEE_DENOMINATOR > borrowed * maxFeeBps) {
-                    revert FeeExceedsMax();
-                }
-
-                if (feeRecipient != address(0)) {
-                    _transferFee(deltas[i].asset, surplus, feeRecipient);
+                if (borrowed > 0) {
+                    // Borrow surplus → solver fee (percentage-checked)
+                    if (surplus * FEE_DENOMINATOR > borrowed * maxFeeBps) {
+                        revert FeeExceedsMax();
+                    }
+                    if (feeRecipient != address(0)) {
+                        _transferOut(deltas[i].asset, surplus, feeRecipient);
+                    }
+                } else {
+                    // Non-borrow surplus (e.g. repay used less than swap output)
+                    // → refund to signer
+                    _transferOut(deltas[i].asset, surplus, callerAddress);
                 }
             }
 
@@ -337,9 +351,9 @@ abstract contract SettlementExecutor is UniversalSettlementLending {
     }
 
     /**
-     * @notice Transfer fee via ERC-20 transfer.
+     * @notice Transfer tokens out — used for both solver fees and signer refunds.
      */
-    function _transferFee(address asset, uint256 amount, address recipient) private {
+    function _transferOut(address asset, uint256 amount, address recipient) private {
         assembly {
             mstore(0x00, 0xa9059cbb00000000000000000000000000000000000000000000000000000000)
             mstore(0x04, recipient)

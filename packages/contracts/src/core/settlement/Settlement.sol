@@ -26,7 +26,7 @@ import {SettlementForwarder} from "./SettlementForwarder.sol";
  *  settlementData format (user-signed):
  *    [1: numConversions]
  *    [per conversion (68 bytes)]:
- *        [20: assetIn][20: assetOut][20: oracle][8: maxSlippageBps]
+ *        [20: assetIn][20: assetOut][20: oracle][8: swapTolerance]
  *
  *  fillerCalldata format (solver-provided):
  *    [per conversion]:
@@ -150,7 +150,7 @@ contract Settlement is
      *
      * @dev If fillerCalldata is empty → no-op (same-asset settlement).
      *      Otherwise, loops through each conversion defined in settlementData:
-     *        1. Parse (assetIn, assetOut, oracle, maxSlippageBps) from settlementData
+     *        1. Parse (assetIn, assetOut, oracle, swapTolerance) from settlementData
      *        2. Parse (assetIn, assetOut, amountIn, target, calldata) from fillerCalldata
      *        3. Verify assetIn/assetOut match between both
      *        4. Transfer amountIn to forwarder
@@ -208,14 +208,14 @@ contract Settlement is
         address sdAssetIn;
         address sdAssetOut;
         address oracle;
-        uint256 maxSlippageBps;
+        uint256 swapTolerance;
 
         assembly {
             let sd := add(add(settlementData, 0x20), sdOffset)
             sdAssetIn := shr(96, mload(sd))
             sdAssetOut := shr(96, mload(add(sd, 20)))
             oracle := shr(96, mload(add(sd, 40)))
-            maxSlippageBps := shr(192, mload(add(sd, 60)))
+            swapTolerance := shr(192, mload(add(sd, 60)))
         }
 
         // ── Parse solver-provided swap details ──
@@ -241,7 +241,7 @@ contract Settlement is
         uint256 amountOut = _forwardSwap(fcAssetIn, fcAssetOut, amountIn, target, fillerCalldata, fcOffset, swapCalldataLen);
 
         // ── Oracle verification ──
-        _verifySwapOutput(oracle, fcAssetIn, fcAssetOut, amountIn, amountOut, maxSlippageBps);
+        _verifySwapOutput(oracle, fcAssetIn, fcAssetOut, amountIn, amountOut, swapTolerance);
 
         // ── Update deltas ──
         newDeltaCount = _updateDelta(deltas, deltaCount, fcAssetIn, -int256(amountIn), 0);
@@ -269,21 +269,23 @@ contract Settlement is
         // Snapshot output balance
         uint256 balBefore;
         assembly {
-            mstore(0, ERC20_BALANCE_OF)
-            mstore(4, address())
-            if iszero(staticcall(gas(), assetOut, 0, 0x24, 0, 0x20)) {
+            let ptr := mload(0x40)
+            mstore(ptr, 0x70a0823100000000000000000000000000000000000000000000000000000000)
+            mstore(add(ptr, 4), address())
+            if iszero(staticcall(gas(), assetOut, ptr, 0x24, ptr, 0x20)) {
                 returndatacopy(0, 0, returndatasize())
                 revert(0, returndatasize())
             }
-            balBefore := mload(0)
+            balBefore := mload(ptr)
         }
 
         // Transfer input to forwarder
         assembly {
-            mstore(0, ERC20_TRANSFER)
-            mstore(4, fwd)
-            mstore(0x24, amountIn)
-            if iszero(call(gas(), assetIn, 0, 0, 0x44, 0, 0x20)) {
+            let ptr := mload(0x40)
+            mstore(ptr, 0xa9059cbb00000000000000000000000000000000000000000000000000000000)
+            mstore(add(ptr, 4), fwd)
+            mstore(add(ptr, 0x24), amountIn)
+            if iszero(call(gas(), assetIn, 0, ptr, 0x44, 0, 0x20)) {
                 returndatacopy(0, 0, returndatasize())
                 revert(0, returndatasize())
             }
@@ -305,13 +307,14 @@ contract Settlement is
 
         // Measure output
         assembly {
-            mstore(0, ERC20_BALANCE_OF)
-            mstore(4, address())
-            if iszero(staticcall(gas(), assetOut, 0, 0x24, 0, 0x20)) {
+            let ptr := mload(0x40)
+            mstore(ptr, 0x70a0823100000000000000000000000000000000000000000000000000000000)
+            mstore(add(ptr, 4), address())
+            if iszero(staticcall(gas(), assetOut, ptr, 0x24, ptr, 0x20)) {
                 returndatacopy(0, 0, returndatasize())
                 revert(0, returndatasize())
             }
-            amountOut := sub(mload(0), balBefore)
+            amountOut := sub(mload(ptr), balBefore)
         }
     }
 }

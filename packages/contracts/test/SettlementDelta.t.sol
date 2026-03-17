@@ -206,9 +206,9 @@ contract SettlementDeltaTest is Test {
         harness.executeSettlement(CALLER, od, ed, bytes(""));
     }
 
-    // ── Unbalanced: surplus reverts ──────────────────────────
+    // ── Non-borrow surplus → refunded to signer ────────────
 
-    function test_revert_unbalanced_surplus() public {
+    function test_nonBorrowSurplus_refundedToSigner() public {
         bytes memory d0 = hex"AA";
         bytes memory d1 = hex"BB";
 
@@ -230,8 +230,8 @@ contract SettlementDeltaTest is Test {
             _action(WETH, uint112(50), 0, d1, p1)
         );
 
-        // Surplus on a non-borrowed asset → UnbalancedSettlement
-        vm.expectRevert(SettlementExecutor.UnbalancedSettlement.selector);
+        // Surplus on a non-borrowed asset → refunded to signer (callerAddress)
+        // No revert — the 50 WETH surplus is transferred out to CALLER
         harness.executeSettlement(CALLER, od, ed, bytes(""));
     }
 
