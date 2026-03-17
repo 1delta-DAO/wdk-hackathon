@@ -9,7 +9,10 @@ import {SettlementExecutor} from "../SettlementExecutor.sol";
  * @notice Moolah (Lista DAO) flash loan callback that executes structured settlement flows.
  *
  * @dev Callback calldata layout (starting at offset 100, after ABI prefix):
- *   [20: origCaller][1: poolId][2: orderDataLen][orderDataLen: orderData][remaining: executionData]
+ *   [20: origCaller][1: poolId]
+ *   [2: orderDataLen][orderDataLen: orderData]
+ *   [2: fillerCalldataLen][fillerCalldataLen: fillerCalldata]
+ *   [remaining: executionData]
  *
  *   poolId == 0 → caller must be LISTA_DAO
  */
@@ -21,11 +24,12 @@ abstract contract MoolahSettlementCallback is SettlementExecutor {
     }
 
     /**
-     * @notice Internal handler: validates caller, parses orderData + executionData, runs settlement
+     * @notice Internal handler: validates caller, parses orderData + fillerCalldata + executionData
      */
     function _onMoolahSettlementCallback() internal {
         address origCaller;
         bytes memory orderData;
+        bytes memory fillerCalldata;
         bytes memory executionData;
 
         assembly {
@@ -48,15 +52,26 @@ abstract contract MoolahSettlementCallback is SettlementExecutor {
             let baseOffset := 121
             let orderLen := and(0xffff, shr(240, calldataload(baseOffset)))
 
+            // Copy orderData
             let fmp := mload(0x40)
             orderData := fmp
             mstore(fmp, orderLen)
             calldatacopy(add(fmp, 0x20), add(baseOffset, 2), orderLen)
             fmp := add(add(fmp, 0x20), and(add(orderLen, 31), not(31)))
 
-            let execStart := add(add(baseOffset, 2), orderLen)
+            // Parse fillerCalldata
+            let fillerStart := add(add(baseOffset, 2), orderLen)
+            let fillerLen := and(0xffff, shr(240, calldataload(fillerStart)))
+
+            fillerCalldata := fmp
+            mstore(fmp, fillerLen)
+            calldatacopy(add(fmp, 0x20), add(fillerStart, 2), fillerLen)
+            fmp := add(add(fmp, 0x20), and(add(fillerLen, 31), not(31)))
+
+            // Remaining calldata is executionData
+            let execStart := add(add(fillerStart, 2), fillerLen)
             let totalParamsLen := calldataload(68)
-            let execLen := sub(totalParamsLen, add(23, orderLen))
+            let execLen := sub(totalParamsLen, sub(execStart, 100))
 
             executionData := fmp
             mstore(fmp, execLen)
@@ -64,6 +79,6 @@ abstract contract MoolahSettlementCallback is SettlementExecutor {
             mstore(0x40, add(add(fmp, 0x20), and(add(execLen, 31), not(31))))
         }
 
-        _executeSettlement(origCaller, orderData, executionData);
+        _executeSettlement(origCaller, orderData, executionData, fillerCalldata);
     }
 }

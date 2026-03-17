@@ -22,6 +22,7 @@ contract SettlementHarness is SettlementExecutor {
     struct IntentCall {
         address callerAddress;
         bytes settlementData;
+        bytes fillerCalldata;
     }
 
     LendingCall[] public lendingCalls;
@@ -67,7 +68,8 @@ contract SettlementHarness is SettlementExecutor {
         address callerAddress,
         bytes memory orderData,
         uint256 offset,
-        uint256 length
+        uint256 length,
+        bytes memory fillerCalldata
     ) internal override {
         bytes memory settlementData = new bytes(length);
         assembly {
@@ -79,16 +81,18 @@ contract SettlementHarness is SettlementExecutor {
         }
         intentCalls.push(IntentCall({
             callerAddress: callerAddress,
-            settlementData: settlementData
+            settlementData: settlementData,
+            fillerCalldata: fillerCalldata
         }));
     }
 
     function executeSettlement(
         address callerAddress,
         bytes memory orderData,
-        bytes memory executionData
+        bytes memory executionData,
+        bytes memory fillerCalldata
     ) external {
-        _executeSettlement(callerAddress, orderData, executionData);
+        _executeSettlement(callerAddress, orderData, executionData, fillerCalldata);
     }
 }
 
@@ -160,7 +164,7 @@ contract SettlementExecutorTest is Test {
             _action(ASSET_B, 500, RECEIVER, 1, 1, borrowData, p1)
         );
 
-        harness.executeSettlement(CALLER, od, ed);
+        harness.executeSettlement(CALLER, od, ed, bytes(""));
 
         assertEq(harness.getLendingCallCount(), 2);
         assertEq(harness.getIntentCallCount(), 1);
@@ -186,7 +190,7 @@ contract SettlementExecutorTest is Test {
         bytes memory od = _orderData(bytes32(0), hex"1234");
         bytes memory ed = abi.encodePacked(uint8(0), uint8(0));
 
-        harness.executeSettlement(CALLER, od, ed);
+        harness.executeSettlement(CALLER, od, ed, bytes(""));
 
         assertEq(harness.getLendingCallCount(), 0);
         assertEq(harness.getIntentCallCount(), 1);
@@ -200,7 +204,6 @@ contract SettlementExecutorTest is Test {
 
         bytes memory od = _orderData(root, hex"");
 
-        // Solver uses wrong lenderData
         bytes memory badData = abi.encodePacked(address(0x9999));
         bytes32[] memory proof = new bytes32[](1);
         proof[0] = fakeLeaf;
@@ -211,7 +214,7 @@ contract SettlementExecutorTest is Test {
         );
 
         vm.expectRevert(SettlementExecutor.InvalidMerkleProof.selector);
-        harness.executeSettlement(CALLER, od, ed);
+        harness.executeSettlement(CALLER, od, ed, bytes(""));
     }
 
     function test_solverChoosesFromMenu_4leaves() public {
@@ -229,7 +232,6 @@ contract SettlementExecutorTest is Test {
         bytes32 h23 = _pair(l2, l3);
         bytes32 root = _pair(h01, h23);
 
-        // Proof for leaf 2: [l3, h01]
         bytes32[] memory proof = new bytes32[](2);
         proof[0] = l3;
         proof[1] = h01;
@@ -240,7 +242,7 @@ contract SettlementExecutorTest is Test {
             _action(ASSET_A, 5000, RECEIVER, 0, 0, p2, proof)
         );
 
-        harness.executeSettlement(CALLER, od, ed);
+        harness.executeSettlement(CALLER, od, ed, bytes(""));
 
         assertEq(harness.getLendingCallCount(), 1);
         assertEq(harness.getLendingCall(0).data, p2);
@@ -261,11 +263,10 @@ contract SettlementExecutorTest is Test {
         bytes32 h23 = _pair(l2, l3);
         bytes32 root = _pair(h01, h23);
 
-        // Build execution data in a helper to avoid stack depth
         bytes memory ed = _buildTwoPreTwoPostExecData(l0, l1, l2, l3, h01, h23, d0, d1, d2, d3);
         bytes memory od = _orderData(root, hex"CAFE");
 
-        harness.executeSettlement(CALLER, od, ed);
+        harness.executeSettlement(CALLER, od, ed, bytes(""));
 
         assertEq(harness.getLendingCallCount(), 4);
         assertEq(harness.getIntentCallCount(), 1);
@@ -273,6 +274,18 @@ contract SettlementExecutorTest is Test {
         assertEq(harness.getLendingCall(1).op, 2);
         assertEq(harness.getLendingCall(2).op, 1);
         assertEq(harness.getLendingCall(3).op, 3);
+    }
+
+    function test_fillerCalldata_passedToIntent() public {
+        bytes memory od = _orderData(bytes32(0), hex"AA");
+        bytes memory ed = abi.encodePacked(uint8(0), uint8(0));
+        bytes memory filler = hex"DEADBEEFCAFE";
+
+        harness.executeSettlement(CALLER, od, ed, filler);
+
+        assertEq(harness.getIntentCallCount(), 1);
+        SettlementHarness.IntentCall memory ic = harness.getIntentCall(0);
+        assertEq(ic.fillerCalldata, filler);
     }
 
     function _buildTwoPreTwoPostExecData(

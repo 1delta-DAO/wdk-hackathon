@@ -44,7 +44,8 @@ abstract contract SettlementExecutor is UniversalSettlementLending {
     function _executeSettlement(
         address callerAddress,
         bytes memory orderData,
-        bytes memory executionData
+        bytes memory executionData,
+        bytes memory fillerCalldata
     ) internal {
         bytes32 merkleRoot;
         uint256 settlementLen;
@@ -70,7 +71,7 @@ abstract contract SettlementExecutor is UniversalSettlementLending {
         execOffset = _executeActions(callerAddress, merkleRoot, executionData, execOffset, numPre);
 
         // Execute intent settlement (settlementData starts at byte 34 of orderData)
-        _executeIntent(callerAddress, orderData, 34, settlementLen);
+        _executeIntent(callerAddress, orderData, 34, settlementLen, fillerCalldata);
 
         // Execute post-actions
         _executeActions(callerAddress, merkleRoot, executionData, execOffset, numPost);
@@ -190,11 +191,13 @@ abstract contract SettlementExecutor is UniversalSettlementLending {
      * @param orderData The full order blob (settlementData is at orderData[offset..offset+length])
      * @param offset Byte offset into orderData where settlementData begins
      * @param length Length of the settlementData
+     * @param fillerCalldata Solver-provided calldata for DEX/fill execution
      */
     function _executeIntent(
         address callerAddress,
         bytes memory orderData,
         uint256 offset,
-        uint256 length
+        uint256 length,
+        bytes memory fillerCalldata
     ) internal virtual;
 }

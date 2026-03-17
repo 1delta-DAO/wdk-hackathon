@@ -9,7 +9,10 @@ import {SettlementExecutor} from "../SettlementExecutor.sol";
  * @notice Morpho Blue flash loan callback that executes structured settlement flows.
  *
  * @dev Callback calldata layout (starting at offset 100, after ABI prefix):
- *   [20: origCaller][1: poolId][2: orderDataLen][orderDataLen: orderData][remaining: executionData]
+ *   [20: origCaller][1: poolId]
+ *   [2: orderDataLen][orderDataLen: orderData]
+ *   [2: fillerCalldataLen][fillerCalldataLen: fillerCalldata]
+ *   [remaining: executionData]
  *
  *   poolId == 0 → caller must be MORPHO_BLUE
  */
@@ -21,17 +24,15 @@ abstract contract MorphoSettlementCallback is SettlementExecutor {
     }
 
     /**
-     * @notice Internal handler: validates caller, parses orderData + executionData, runs settlement
+     * @notice Internal handler: validates caller, parses orderData + fillerCalldata + executionData
      */
     function _onMorphoSettlementCallback() internal {
         address origCaller;
         bytes memory orderData;
+        bytes memory fillerCalldata;
         bytes memory executionData;
 
         assembly {
-            // The Morpho callback ABI places the bytes param data starting at calldataload(68)
-            // which gives the offset to the bytes content. The actual bytes content starts at
-            // offset 100 in calldata (4 selector + 32 uint256 + 32 offset + 32 length).
             let firstWord := calldataload(100)
 
             // poolId is at byte 20 of the first word (bits 95..88)
@@ -54,19 +55,28 @@ abstract contract MorphoSettlementCallback is SettlementExecutor {
             let baseOffset := 121
             let orderLen := and(0xffff, shr(240, calldataload(baseOffset)))
 
-            // Copy orderData into memory as bytes
+            // Copy orderData into memory
             let fmp := mload(0x40)
             orderData := fmp
             mstore(fmp, orderLen)
             calldatacopy(add(fmp, 0x20), add(baseOffset, 2), orderLen)
             fmp := add(add(fmp, 0x20), and(add(orderLen, 31), not(31)))
 
+            // Parse fillerCalldata
+            let fillerStart := add(add(baseOffset, 2), orderLen)
+            let fillerLen := and(0xffff, shr(240, calldataload(fillerStart)))
+
+            fillerCalldata := fmp
+            mstore(fmp, fillerLen)
+            calldatacopy(add(fmp, 0x20), add(fillerStart, 2), fillerLen)
+            fmp := add(add(fmp, 0x20), and(add(fillerLen, 31), not(31)))
+
             // Remaining calldata is executionData
-            let execStart := add(add(baseOffset, 2), orderLen)
-            // calldataload(68) is the ABI-encoded length of the bytes param
+            let execStart := add(add(fillerStart, 2), fillerLen)
             let totalParamsLen := calldataload(68)
-            // totalParamsLen includes origCaller(20) + poolId(1) + orderLenField(2) + orderData + execData
-            let execLen := sub(totalParamsLen, add(add(23, orderLen), 0))
+            // totalParamsLen = origCaller(20) + poolId(1) + orderLenField(2) + orderData
+            //                + fillerLenField(2) + fillerCalldata + executionData
+            let execLen := sub(totalParamsLen, sub(execStart, 100))
 
             executionData := fmp
             mstore(fmp, execLen)
@@ -74,6 +84,6 @@ abstract contract MorphoSettlementCallback is SettlementExecutor {
             mstore(0x40, add(add(fmp, 0x20), and(add(execLen, 31), not(31))))
         }
 
-        _executeSettlement(origCaller, orderData, executionData);
+        _executeSettlement(origCaller, orderData, executionData, fillerCalldata);
     }
 }
