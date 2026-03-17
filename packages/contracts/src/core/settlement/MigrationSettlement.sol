@@ -91,16 +91,14 @@ contract MigrationSettlement is MorphoSettlementCallback, MorphoFlashLoans, Aave
      */
     function _executeIntent(
         address, /* callerAddress */
-        bytes memory orderData,
-        uint256 offset,
-        uint256 length,
+        bytes memory settlementData,
         bytes memory, /* fillerCalldata */
-        AssetDelta[] memory deltas,
+        AssetDelta[] memory,
         uint256 deltaCount
     ) internal view override returns (uint256 newDeltaCount) {
         newDeltaCount = deltaCount;
 
-        if (length == 0) return newDeltaCount;
+        if (settlementData.length == 0) return newDeltaCount;
 
         uint256 intentType;
         address sourcePool;
@@ -108,7 +106,7 @@ contract MigrationSettlement is MorphoSettlementCallback, MorphoFlashLoans, Aave
         address borrowAsset;
 
         assembly {
-            let d := add(add(orderData, 0x20), offset)
+            let d := add(settlementData, 0x20)
             intentType := shr(248, mload(d))
             sourcePool := shr(96, mload(add(d, 1)))
             destPool := shr(96, mload(add(d, 21)))

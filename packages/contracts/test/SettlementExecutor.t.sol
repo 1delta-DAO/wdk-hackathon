@@ -68,22 +68,12 @@ contract SettlementHarness is SettlementExecutor {
 
     function _executeIntent(
         address callerAddress,
-        bytes memory orderData,
-        uint256 offset,
-        uint256 length,
+        bytes memory settlementData,
         bytes memory fillerCalldata,
         AssetDelta[] memory,
         uint256 deltaCount
     ) internal override returns (uint256 newDeltaCount) {
         newDeltaCount = deltaCount;
-        bytes memory settlementData = new bytes(length);
-        assembly {
-            let src := add(add(orderData, 0x20), offset)
-            let dest := add(settlementData, 0x20)
-            for { let i := 0 } lt(i, length) { i := add(i, 32) } {
-                mstore(add(dest, i), mload(add(src, i)))
-            }
-        }
         intentCalls.push(IntentCall({
             callerAddress: callerAddress,
             settlementData: settlementData,

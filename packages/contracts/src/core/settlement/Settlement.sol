@@ -6,34 +6,63 @@ import {MorphoSettlementCallback} from "./flash-loan/MorphoSettlementCallback.so
 import {MoolahSettlementCallback} from "./flash-loan/MoolahSettlementCallback.sol";
 import {MorphoFlashLoans} from "./flash-loan/Morpho.sol";
 import {EIP712OrderVerifier} from "./EIP712OrderVerifier.sol";
+import {SwapVerifier} from "./oracle/SwapVerifier.sol";
 import {SettlementForwarder} from "./SettlementForwarder.sol";
 
 /**
  * @title Settlement
  * @notice Concrete settlement contract with EIP-712 order verification, flash loan
- *         support, delta-validated lending actions, and isolated DEX execution.
+ *         support, delta-validated lending actions, and oracle-verified DEX swaps.
  *
- *         The user signs (merkleRoot, deadline, settlementData) via EIP-712.
- *         The solver submits the signature along with execution data.
- *         The contract recovers the signer and uses it as the position owner
- *         for all lending operations, ensuring only the signer's positions
- *         are touched.
+ * ═══════════════════════════════════════════════════════════════════════════════
+ *  ORACLE-VERIFIED SWAPS
+ * ═══════════════════════════════════════════════════════════════════════════════
  *
- * @dev settlementData format (inside orderData):
- *   [20: inputToken][14: inputAmount][20: outputToken][14: minOutputAmount]
+ *  The user pre-defines allowed asset conversions in the signed orderData.
+ *  Each conversion specifies an oracle and a slippage tolerance.  The solver
+ *  executes the swap in the isolated forwarder, then the contract verifies
+ *  the received amount against the oracle price.
  *
- * @dev fillerCalldata format:
- *   [20: target][remaining: calldata to forward]
+ *  settlementData format (user-signed):
+ *    [1: numConversions]
+ *    [per conversion (68 bytes)]:
+ *        [20: assetIn][20: assetOut][20: oracle][8: maxSlippageBps]
+ *
+ *  fillerCalldata format (solver-provided):
+ *    [per conversion]:
+ *        [20: assetIn][20: assetOut][14: amountIn]
+ *        [20: target][2: calldataLen][calldataLen: calldata]
+ *
+ *  The conversions are matched in order: conversion 0 in settlementData
+ *  is paired with swap 0 in fillerCalldata.  The assetIn/assetOut in both
+ *  MUST match — the contract verifies this.
+ *
+ *  If fillerCalldata is empty, the intent is a no-op (same-asset settlement).
+ *  If settlementData is empty (numConversions = 0), no swaps are allowed.
+ *
+ * ═══════════════════════════════════════════════════════════════════════════════
+ *  SECURITY MODEL
+ * ═══════════════════════════════════════════════════════════════════════════════
+ *
+ *  1. Swaps execute in the SettlementForwarder (no token approvals → cannot
+ *     drain user funds via transferFrom).
+ *  2. The user signs which (assetIn, assetOut, oracle, slippage) pairs are
+ *     allowed — the solver cannot invent new conversion paths.
+ *  3. The oracle verifies the received amount — the solver cannot fill at a
+ *     bad price beyond the signed slippage tolerance.
+ *  4. The zero-sum delta check ensures everything balances at the end.
  */
 contract Settlement is
     MorphoFlashLoans,
     MorphoSettlementCallback,
     MoolahSettlementCallback,
-    EIP712OrderVerifier
+    EIP712OrderVerifier,
+    SwapVerifier
 {
     SettlementForwarder public immutable forwarder;
 
-    error InsufficientOutput();
+    /// @dev assetIn/assetOut in fillerCalldata doesn't match settlementData.
+    error ConversionMismatch();
 
     constructor() {
         forwarder = new SettlementForwarder(address(this));
@@ -43,14 +72,6 @@ contract Settlement is
 
     /**
      * @notice Direct settlement without flash loan.
-     *         Verifies the EIP-712 signature, recovers the signer as position owner,
-     *         then executes the full pre-actions → intent → post-actions → fee → delta check flow.
-     * @param maxFeeBps          Maximum solver fee the user allows (must match signed orderData)
-     * @param deadline        Order expiry timestamp (included in signed data)
-     * @param signature       65-byte EIP-712 signature (r ++ s ++ v) from position owner
-     * @param orderData       Packed order: [32: merkleRoot][2: settlementLen][settlementData]
-     * @param executionData   Solver-provided: [1: numPre][1: numPost][20: feeRecipient][20: feeAsset][14: feeAmount][actions...]
-     * @param fillerCalldata  Solver-provided DEX/fill calldata for the intent step
      */
     function settle(
         uint256 maxFeeBps,
@@ -66,17 +87,6 @@ contract Settlement is
 
     /**
      * @notice Flash-loan-wrapped settlement with EIP-712 order verification.
-     *         Recovers the signer from the signature, then initiates a Morpho flash
-     *         loan whose callback executes the full settlement flow.
-     * @param flashLoanAsset  Token to flash borrow
-     * @param flashLoanAmount Amount to flash borrow
-     * @param flashLoanPool   The Morpho-style pool to flash borrow from
-     * @param poolId          Pool identifier (0 = Morpho Blue, etc.)
-     * @param deadline        Order expiry timestamp
-     * @param signature       65-byte EIP-712 signature (r ++ s ++ v)
-     * @param orderData       Packed order blob
-     * @param executionData   Solver-provided action data
-     * @param fillerCalldata  Solver-provided DEX/fill calldata
      */
     function settleWithFlashLoan(
         address flashLoanAsset,
@@ -112,13 +122,6 @@ contract Settlement is
 
     // ── Order Verification ───────────────────────────────
 
-    /**
-     * @notice Parse orderData, recover the EIP-712 signer, and return both.
-     * @dev Extracts merkleRoot and settlementData from orderData, then calls
-     *      _recoverOrderSigner which checks the deadline and ecrecovers.
-     * @return user           The recovered signer (position owner)
-     * @return merkleRoot     The merkle root from orderData (for reference)
-     */
     function _verifyAndExtract(
         uint48 deadline,
         bytes calldata signature,
@@ -139,113 +142,176 @@ contract Settlement is
         user = _recoverOrderSigner(merkleRoot, deadline, settlementData, signature);
     }
 
-    // ── Intent Implementation ────────────────────────────
+    // ── Intent: Oracle-Verified Swaps ────────────────────
 
     /**
-     * @notice Executes the solver's fill/swap via an isolated forwarder and folds
-     *         the conversion into the settlement's per-asset delta ledger.
+     * @notice Executes solver swaps via the isolated forwarder, verifies each
+     *         against the user-signed oracle + slippage, and updates deltas.
      *
-     * @dev Flow:
-     *      1. Parse user-signed constraints from settlementData:
-     *         [20: inputToken][14: inputAmount][20: outputToken][14: minOutputAmount]
-     *      2. Snapshot `balanceOf(outputToken)` on this contract.
-     *      3. Transfer `inputAmount` of `inputToken` to the forwarder.
-     *      4. Execute the solver-provided DEX calldata via the forwarder (sandboxed).
-     *      5. Sweep `outputToken` back from the forwarder.
-     *      6. Verify `outputReceived >= minOutputAmount`.
-     *      7. Update deltas:
-     *           delta[inputToken]  -= inputAmount
-     *           delta[outputToken] += outputReceived
-     *
-     *      If `fillerCalldata` is empty the function is a no-op — deltas pass
-     *      through unchanged and post-actions must consume them directly.
+     * @dev If fillerCalldata is empty → no-op (same-asset settlement).
+     *      Otherwise, loops through each conversion defined in settlementData:
+     *        1. Parse (assetIn, assetOut, oracle, maxSlippageBps) from settlementData
+     *        2. Parse (assetIn, assetOut, amountIn, target, calldata) from fillerCalldata
+     *        3. Verify assetIn/assetOut match between both
+     *        4. Transfer amountIn to forwarder
+     *        5. Execute swap via forwarder
+     *        6. Sweep assetOut back
+     *        7. Verify output against oracle + slippage
+     *        8. Update deltas: delta[assetIn] -= amountIn, delta[assetOut] += output
      */
     function _executeIntent(
         address, /* callerAddress */
-        bytes memory orderData,
-        uint256 offset,
-        uint256 length,
+        bytes memory settlementData,
         bytes memory fillerCalldata,
         AssetDelta[] memory deltas,
         uint256 deltaCount
     ) internal override returns (uint256 newDeltaCount) {
         if (fillerCalldata.length == 0) return deltaCount;
 
-        address inputToken;
-        uint256 inputAmount;
-        address outputToken;
-        uint256 minOutputAmount;
+        newDeltaCount = deltaCount;
 
+        // Parse numConversions from settlementData
+        uint256 numConversions;
         assembly {
-            let sd := add(add(orderData, 0x20), offset)
-            inputToken := shr(96, mload(sd))
-            inputAmount := shr(144, mload(add(sd, 20)))
-            outputToken := shr(96, mload(add(sd, 34)))
-            minOutputAmount := shr(144, mload(add(sd, 54)))
+            numConversions := shr(248, mload(add(settlementData, 0x20)))
         }
 
-        // Snapshot output balance before swap
-        uint256 balBefore;
+        // settlementData cursor: after the 1-byte numConversions header
+        uint256 sdOffset = 1;
+        // fillerCalldata cursor
+        uint256 fcOffset;
+
+        for (uint256 i; i < numConversions;) {
+            uint256 fcLen;
+            (newDeltaCount, fcLen) = _executeSwap(settlementData, sdOffset, fillerCalldata, fcOffset, deltas, newDeltaCount);
+            sdOffset += 68;
+            fcOffset += fcLen;
+            unchecked { ++i; }
+        }
+    }
+
+    /**
+     * @notice Execute one oracle-verified swap and update deltas.
+     * @dev Extracted to avoid stack-too-deep in the conversion loop.
+     * @return newDeltaCount Updated delta count.
+     * @return fcConsumed    Bytes consumed from fillerCalldata for this swap.
+     */
+    function _executeSwap(
+        bytes memory settlementData,
+        uint256 sdOffset,
+        bytes memory fillerCalldata,
+        uint256 fcOffset,
+        AssetDelta[] memory deltas,
+        uint256 deltaCount
+    ) private returns (uint256 newDeltaCount, uint256 fcConsumed) {
+        // ── Parse user-signed conversion params (68 bytes) ──
+        address sdAssetIn;
+        address sdAssetOut;
+        address oracle;
+        uint256 maxSlippageBps;
+
+        assembly {
+            let sd := add(add(settlementData, 0x20), sdOffset)
+            sdAssetIn := shr(96, mload(sd))
+            sdAssetOut := shr(96, mload(add(sd, 20)))
+            oracle := shr(96, mload(add(sd, 40)))
+            maxSlippageBps := shr(192, mload(add(sd, 60)))
+        }
+
+        // ── Parse solver-provided swap details ──
+        address fcAssetIn;
+        address fcAssetOut;
+        uint256 amountIn;
+        address target;
+        uint256 swapCalldataLen;
+
+        assembly {
+            let fc := add(add(fillerCalldata, 0x20), fcOffset)
+            fcAssetIn := shr(96, mload(fc))
+            fcAssetOut := shr(96, mload(add(fc, 20)))
+            amountIn := shr(144, mload(add(fc, 40)))
+            target := shr(96, mload(add(fc, 54)))
+            swapCalldataLen := and(0xffff, shr(240, mload(add(fc, 74))))
+        }
+
+        // Verify asset pair matches user-signed config
+        if (fcAssetIn != sdAssetIn || fcAssetOut != sdAssetOut) revert ConversionMismatch();
+
+        // ── Execute the swap ──
+        uint256 amountOut = _forwardSwap(fcAssetIn, fcAssetOut, amountIn, target, fillerCalldata, fcOffset, swapCalldataLen);
+
+        // ── Oracle verification ──
+        _verifySwapOutput(oracle, fcAssetIn, fcAssetOut, amountIn, amountOut, maxSlippageBps);
+
+        // ── Update deltas ──
+        newDeltaCount = _updateDelta(deltas, deltaCount, fcAssetIn, -int256(amountIn), 0);
+        newDeltaCount = _updateDelta(deltas, newDeltaCount, fcAssetOut, int256(amountOut), 0);
+
+        // 20 + 20 + 14 + 20 + 2 + swapCalldataLen = 76 + swapCalldataLen
+        fcConsumed = 76 + swapCalldataLen;
+    }
+
+    /**
+     * @notice Transfer tokens to forwarder, execute swap, sweep output back.
+     * @return amountOut The output amount received.
+     */
+    function _forwardSwap(
+        address assetIn,
+        address assetOut,
+        uint256 amountIn,
+        address target,
+        bytes memory fillerCalldata,
+        uint256 fcOffset,
+        uint256 swapCalldataLen
+    ) private returns (uint256 amountOut) {
         address payable fwd = payable(address(forwarder));
+
+        // Snapshot output balance
+        uint256 balBefore;
         assembly {
             mstore(0, ERC20_BALANCE_OF)
             mstore(4, address())
-            if iszero(staticcall(gas(), outputToken, 0, 0x24, 0, 0x20)) {
+            if iszero(staticcall(gas(), assetOut, 0, 0x24, 0, 0x20)) {
                 returndatacopy(0, 0, returndatasize())
                 revert(0, returndatasize())
             }
             balBefore := mload(0)
         }
 
-        // 1. Transfer input tokens to forwarder
+        // Transfer input to forwarder
         assembly {
             mstore(0, ERC20_TRANSFER)
             mstore(4, fwd)
-            mstore(0x24, inputAmount)
-            if iszero(call(gas(), inputToken, 0, 0, 0x44, 0, 0x20)) {
+            mstore(0x24, amountIn)
+            if iszero(call(gas(), assetIn, 0, 0, 0x44, 0, 0x20)) {
                 returndatacopy(0, 0, returndatasize())
                 revert(0, returndatasize())
             }
         }
 
-        // 2. Parse target and calldata from fillerCalldata: [20: target][remaining: calldata]
-        address target;
+        // Build swap calldata and execute
+        bytes memory swapCalldata = new bytes(swapCalldataLen);
         assembly {
-            target := shr(96, mload(add(fillerCalldata, 0x20)))
-        }
-        uint256 fwdCalldataLen = fillerCalldata.length - 20;
-        bytes memory fwdCalldata = new bytes(fwdCalldataLen);
-        assembly {
-            let src := add(fillerCalldata, 0x34)
-            let dest := add(fwdCalldata, 0x20)
-            for { let i := 0 } lt(i, fwdCalldataLen) { i := add(i, 32) } {
-                mstore(add(dest, i), mload(add(src, i)))
+            let src := add(add(fillerCalldata, 0x20), add(fcOffset, 76))
+            let dest := add(swapCalldata, 0x20)
+            for { let j := 0 } lt(j, swapCalldataLen) { j := add(j, 32) } {
+                mstore(add(dest, j), mload(add(src, j)))
             }
         }
+        SettlementForwarder(fwd).execute(target, swapCalldata);
 
-        // 3. Execute via forwarder (isolated context)
-        SettlementForwarder(fwd).execute(target, fwdCalldata);
+        // Sweep output back
+        SettlementForwarder(fwd).sweep(assetOut);
 
-        // 4. Sweep output tokens back
-        SettlementForwarder(fwd).sweep(outputToken);
-
-        // 5. Verify minimum output received
-        uint256 balAfter;
+        // Measure output
         assembly {
             mstore(0, ERC20_BALANCE_OF)
             mstore(4, address())
-            if iszero(staticcall(gas(), outputToken, 0, 0x24, 0, 0x20)) {
+            if iszero(staticcall(gas(), assetOut, 0, 0x24, 0, 0x20)) {
                 returndatacopy(0, 0, returndatasize())
                 revert(0, returndatasize())
             }
-            balAfter := mload(0)
+            amountOut := sub(mload(0), balBefore)
         }
-
-        uint256 outputReceived = balAfter - balBefore;
-        if (outputReceived < minOutputAmount) revert InsufficientOutput();
-
-        // 6. Update deltas: input consumed, output received
-        newDeltaCount = _updateDelta(deltas, deltaCount, inputToken, -int256(inputAmount), 0);
-        newDeltaCount = _updateDelta(deltas, newDeltaCount, outputToken, int256(outputReceived), 0);
     }
 }

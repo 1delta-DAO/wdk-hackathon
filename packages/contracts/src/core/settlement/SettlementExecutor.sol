@@ -108,12 +108,23 @@ abstract contract SettlementExecutor is UniversalSettlementLending {
         bytes memory fillerCalldata
     ) internal {
         bytes32 merkleRoot;
-        uint256 settlementLen;
+        bytes memory settlementData;
 
         assembly {
             let od := add(orderData, 0x20)
             merkleRoot := mload(od)
-            settlementLen := and(0xffff, shr(240, mload(add(od, 32))))
+            let sLen := and(0xffff, shr(240, mload(add(od, 32))))
+
+            // Copy settlementData into its own bytes memory
+            let fmp := mload(0x40)
+            settlementData := fmp
+            mstore(fmp, sLen)
+            let src := add(od, 34)
+            let dest := add(fmp, 0x20)
+            for { let j := 0 } lt(j, sLen) { j := add(j, 32) } {
+                mstore(add(dest, j), mload(add(src, j)))
+            }
+            mstore(0x40, add(dest, and(add(sLen, 31), not(31))))
         }
 
         uint256 numPre;
@@ -140,7 +151,7 @@ abstract contract SettlementExecutor is UniversalSettlementLending {
 
         // ── Stage 2: intent (optional conversion) ──
         deltaCount = _executeIntent(
-            callerAddress, orderData, 34, settlementLen, fillerCalldata, deltas, deltaCount
+            callerAddress, settlementData, fillerCalldata, deltas, deltaCount
         );
 
         // ── Stage 3: post-actions ──
@@ -381,12 +392,19 @@ abstract contract SettlementExecutor is UniversalSettlementLending {
      * @dev Concrete implementations use this to execute asset conversions.
      *      The `deltas` array MUST be updated in-place to reflect any conversion.
      *      If no conversion is needed, return `deltaCount` unchanged.
+     *
+     * @param callerAddress  The order signer / position owner.
+     * @param settlementData The user-signed settlement parameters (extracted from orderData).
+     *                       Empty bytes if no intent parameters were signed.
+     * @param fillerCalldata Solver-provided swap execution payload.
+     *                       Empty bytes if no conversion needed (no-op).
+     * @param deltas         Per-asset delta array (modified in-place).
+     * @param deltaCount     Current number of unique assets tracked.
+     * @return newDeltaCount Updated count after any new assets introduced by conversions.
      */
     function _executeIntent(
         address callerAddress,
-        bytes memory orderData,
-        uint256 offset,
-        uint256 length,
+        bytes memory settlementData,
         bytes memory fillerCalldata,
         AssetDelta[] memory deltas,
         uint256 deltaCount

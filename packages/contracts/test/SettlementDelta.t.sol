@@ -67,8 +67,6 @@ contract DeltaHarness is SettlementExecutor {
     function _executeIntent(
         address,
         bytes memory,
-        uint256,
-        uint256,
         bytes memory,
         AssetDelta[] memory deltas,
         uint256 deltaCount
