@@ -66,13 +66,14 @@ contract MigrationSettlement is MorphoSettlementCallback, MorphoFlashLoans, Aave
 
         _verifyOrder(user, merkleRoot, deadline, settlementData, signature);
 
-        uint256 paramsLength = 3 + orderData.length + executionData.length;
+        uint256 paramsLength = 5 + orderData.length + executionData.length;
         bytes memory flashLoanData = abi.encodePacked(
             FLASH_LOAN_POOL,
             uint16(paramsLength),
             uint8(0), // poolId = 0 → Morpho Blue
             uint16(orderData.length),
             orderData,
+            uint16(0), // fillerCalldataLen = 0 (no swap/fill for simple migration)
             executionData
         );
         morphoFlashLoan(flashLoanAsset, flashLoanAmount, user, flashLoanData);
@@ -88,7 +89,8 @@ contract MigrationSettlement is MorphoSettlementCallback, MorphoFlashLoans, Aave
         address, /* callerAddress */
         bytes memory orderData,
         uint256 offset,
-        uint256 length
+        uint256 length,
+        bytes memory /* fillerCalldata */
     ) internal view override {
         if (length == 0) return;
 

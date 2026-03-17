@@ -73,7 +73,7 @@ contract MigrationTestHarness is MigrationSettlement {
         bytes memory orderData,
         bytes memory executionData
     ) external {
-        _executeSettlement(callerAddress, orderData, executionData);
+        _executeSettlement(callerAddress, orderData, executionData, bytes(""));
     }
 
     function getLendingCallCount() external view returns (uint256) {
