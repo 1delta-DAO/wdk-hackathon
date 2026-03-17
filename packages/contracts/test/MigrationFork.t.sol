@@ -227,7 +227,7 @@ contract MigrationForkTest is Test {
         bytes memory sig = _signOrder(userPk, root, deadline, settlementPayload);
 
         settlement.runMigration(
-            USDC, flashLoanAmount, user, deadline, sig, orderData, executionData
+            USDC, flashLoanAmount, deadline, sig, orderData, executionData
         );
 
         // Verify position migrated from Prime → Core
@@ -318,7 +318,7 @@ contract MigrationForkTest is Test {
         bytes memory sig = _signOrder(userPk, root, deadline, settlementPayload);
 
         vm.expectRevert(AaveV3AprChecker.DestinationRateNotBetter.selector);
-        settlement.runMigration(USDC, flashLoanAmount, user, deadline, sig, orderData, executionData);
+        settlement.runMigration(USDC, flashLoanAmount, deadline, sig, orderData, executionData);
 
         assertGt(IERC20(vDebtUSDC_dst).balanceOf(user), 0, "Core debt unchanged");
         assertGt(IERC20(aWETH_dst).balanceOf(user), 0, "Core collateral unchanged");
@@ -394,7 +394,7 @@ contract MigrationForkTest is Test {
         bytes memory sig = _signOrder(userPk, root, deadline, settlementPayload);
 
         vm.expectRevert(SettlementExecutor.InvalidMerkleProof.selector);
-        settlement.runMigration(USDC, flashLoanAmount, user, deadline, sig, orderData, executionData);
+        settlement.runMigration(USDC, flashLoanAmount, deadline, sig, orderData, executionData);
 
         assertGt(IERC20(vDebtUSDC_src).balanceOf(user), 0, "Prime debt unchanged");
         assertGt(IERC20(aWETH_src).balanceOf(user), 0, "Prime collateral unchanged");

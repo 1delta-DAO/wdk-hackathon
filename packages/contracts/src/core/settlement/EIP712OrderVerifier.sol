@@ -37,20 +37,19 @@ abstract contract EIP712OrderVerifier {
     }
 
     /**
-     * @notice Verifies that `signer` signed a MigrationOrder covering the given fields.
-     * @param signer           Expected signer (the position owner)
+     * @notice Recovers the signer of a MigrationOrder after checking the deadline.
      * @param merkleRoot       Merkle root of allowed actions
      * @param deadline         Order expiry timestamp
      * @param settlementData   Raw settlement data bytes
      * @param signature        65-byte packed signature (r ++ s ++ v)
+     * @return signer          The recovered address (position owner)
      */
-    function _verifyOrder(
-        address signer,
+    function _recoverOrderSigner(
         bytes32 merkleRoot,
         uint48 deadline,
         bytes memory settlementData,
         bytes memory signature
-    ) internal view {
+    ) internal view returns (address signer) {
         if (block.timestamp > deadline) revert OrderExpired();
 
         bytes32 structHash = keccak256(
@@ -58,18 +57,19 @@ abstract contract EIP712OrderVerifier {
         );
         bytes32 digest = keccak256(abi.encodePacked("\x19\x01", _DOMAIN_SEPARATOR, structHash));
 
-        address recovered;
         assembly {
             let ptr := mload(0x40)
             mstore(ptr, digest)
             mstore(add(ptr, 0x20), byte(0, mload(add(signature, 0x60)))) // v
             mstore(add(ptr, 0x40), mload(add(signature, 0x20)))          // r
             mstore(add(ptr, 0x60), mload(add(signature, 0x40)))          // s
-            pop(staticcall(gas(), 0x01, ptr, 0x80, ptr, 0x20))
-            recovered := mload(ptr)
+            // clear scratch space with zero (address(0) is invalid signature)
+            mstore(0x00, 0)
+            pop(staticcall(gas(), 0x01, ptr, 0x80, 0x00, 0x20))
+            signer := mload(0x00)
         }
 
-        if (recovered == address(0) || recovered != signer) {
+        if (signer == address(0)) {
             revert InvalidOrderSignature();
         }
     }
