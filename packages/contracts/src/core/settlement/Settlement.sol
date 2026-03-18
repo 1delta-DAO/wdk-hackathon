@@ -31,8 +31,11 @@ import {SettlementForwarder} from "./SettlementForwarder.sol";
  *        [20: assetIn][20: assetOut][20: oracle][8: swapTolerance]
  *    [optional 1: numConditions]
  *    [optional per condition — variable size based on lenderId]:
- *        Aave   (lenderId 0-1999):   [2: lenderId][20: pool][14: minHF]                = 36 bytes
- *        Morpho (lenderId 4000-4999): [2: lenderId][20: morpho][32: marketId][14: minHF] = 68 bytes
+ *        Aave       (lenderId 0-1999):    [2: lenderId][20: pool][14: minHF]                = 36 bytes
+ *        CompoundV3 (lenderId 2000-2999): [2: lenderId][20: comet][2: assetBitmap][14: minHF] = 38 bytes
+ *        CompoundV2 (lenderId 3000-3999): [2: lenderId][20: comptroller][14: minHF]         = 36 bytes
+ *        Morpho     (lenderId 4000-4999): [2: lenderId][20: morpho][32: marketId][14: minHF] = 68 bytes
+ *        SiloV2     (lenderId 5000-5999): [2: lenderId][20: silo][14: minHF]                = 36 bytes
  *
  *  fillerCalldata format (solver-provided):
  *    [per conversion]:
@@ -73,6 +76,9 @@ contract Settlement is
 
     /// @dev assetIn/assetOut in fillerCalldata doesn't match settlementData.
     error ConversionMismatch();
+
+    /// @dev A condition lenderId has no corresponding health factor check.
+    error UnsupportedConditionLender();
 
     constructor() {
         forwarder = new SettlementForwarder(address(this));
@@ -356,8 +362,11 @@ contract Settlement is
      * @dev Format after conversion data:
      *        [1: numConditions]
      *        [per condition — variable size based on lenderId]:
-     *            Aave (lenderId < 2000):   [2: lenderId][20: pool][14: minHF]         = 36 bytes
-     *            Morpho (4000 ≤ id < 5000):[2: lenderId][20: morpho][32: marketId][14: minHF] = 68 bytes
+     *            Aave (id < 2000):   [2: lenderId][20: pool][14: minHF]         = 36 bytes
+     *            CompoundV3 (2000–2999): [2: lenderId][20: comet][2: assetBitmap][14: minHF] = 38 bytes
+     *            CompoundV2 (3000–3999): [2: lenderId][20: comptroller][14: minHF] = 36 bytes
+     *            Morpho (4000–4999): [2: lenderId][20: morpho][32: marketId][14: minHF] = 68 bytes
+     *            SiloV2 (5000–5999): [2: lenderId][20: silo][14: minHF]           = 36 bytes
      *
      *      If settlementData ends at the conversion section, no conditions are checked.
      *      Routes by lenderId using LenderIds thresholds (same as lending operations).
@@ -399,6 +408,28 @@ contract Settlement is
                 }
                 _checkAaveHealthFactor(pool, callerAddress, minHF);
                 cursor += 36;
+            } else if (lenderId < LenderIds.UP_TO_COMPOUND_V3) {
+                // 38-byte Compound V3 condition: [2: lenderId][20: comet][2: assetBitmap][14: minHF]
+                address comet;
+                uint256 assetBitmap;
+                uint256 minHF;
+                assembly {
+                    let ptr := add(add(settlementData, 0x20), cursor)
+                    comet := shr(96, mload(add(ptr, 2)))
+                    assetBitmap := and(0xffff, shr(240, mload(add(ptr, 22))))
+                    minHF := shr(144, mload(add(ptr, 24)))
+                }
+                _checkCompoundV3HealthFactor(comet, callerAddress, assetBitmap, minHF);
+                cursor += 38;
+            } else if (lenderId < LenderIds.UP_TO_COMPOUND_V2) {
+                // 36-byte Compound V2 condition: [2: lenderId][20: comptroller][14: minHF]
+                address comptroller;
+                assembly {
+                    let ptr := add(add(settlementData, 0x20), cursor)
+                    comptroller := shr(96, mload(add(ptr, 2)))
+                }
+                _checkCompoundV2Solvency(comptroller, callerAddress);
+                cursor += 36;
             } else if (lenderId < LenderIds.UP_TO_MORPHO) {
                 // 68-byte Morpho condition: [2: lenderId][20: morpho][32: marketId][14: minHF]
                 address morpho;
@@ -412,6 +443,17 @@ contract Settlement is
                 }
                 _checkMorphoHealthFactor(morpho, marketId, callerAddress, minHF);
                 cursor += 68;
+            } else if (lenderId < LenderIds.UP_TO_SILO_V2) {
+                // 36-byte Silo V2 condition: [2: lenderId][20: silo][14: minHF]
+                address silo;
+                assembly {
+                    let ptr := add(add(settlementData, 0x20), cursor)
+                    silo := shr(96, mload(add(ptr, 2)))
+                }
+                _checkSiloV2Solvency(silo, callerAddress);
+                cursor += 36;
+            } else {
+                revert UnsupportedConditionLender();
             }
 
             unchecked { ++i; }

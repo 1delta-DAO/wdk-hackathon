@@ -35,6 +35,38 @@ pragma solidity 0.8.34;
  *        healthFactor = maxBorrow * 1e18 / borrowed
  *
  *      When borrowShares == 0, the position is healthy (no debt).
+ *
+ *      Compound V3 (Comet):
+ *      No aggregate health factor. Computed from user-specified collateral assets via bitmap:
+ *
+ *        borrowValue = borrowBalanceOf(user) * getPrice(baseTokenPriceFeed) / baseScale
+ *        collValue   = sum over i in assetBitmap: balance_i * getPrice(priceFeed_i) / scale_i * liquidateCF_i / 1e18
+ *        healthFactor = collValue * 1e18 / borrowValue
+ *
+ *      The assetBitmap (uint16) selects which asset indices to check, avoiding
+ *      iteration over all Comet assets (e.g. 13 on USDC Comet).
+ *      When borrowBalanceOf(user) == 0, the position is healthy (no debt).
+ *
+ *      Compound V2 (and forks):
+ *      Binary solvency check via the Comptroller. Computing an exact numeric health
+ *      factor would require iterating all entered markets; instead we use:
+ *
+ *        Comptroller.getAccountLiquidity(user) → (error, liquidity, shortfall)
+ *        Reverts if error != 0 || shortfall > 0.
+ *
+ *      This is equivalent to HF >= 1.0. The minHealthFactor parameter in the
+ *      condition data is reserved for forward compatibility but not used for
+ *      fine-grained thresholds.
+ *
+ *      Silo V2:
+ *      Binary solvency check on the isolated Silo vault:
+ *
+ *        ISilo(silo).isSolvent(user) → bool
+ *
+ *      Silo V2 uses per-market isolated positions. The silo contract internally
+ *      checks collateral value against borrow value using its configured oracle
+ *      and liquidation threshold. Reverts if the user is insolvent.
+ *      Like Compound V2, the minHealthFactor parameter is reserved.
  */
 abstract contract HealthFactorChecker {
     error HealthFactorTooLow();
@@ -80,6 +112,15 @@ abstract contract HealthFactorChecker {
     /**
      * @notice Reverts if the user's Morpho Blue market health factor is below `minHealthFactor`.
      *         Fetches all required data on-chain from the marketId alone.
+     *
+     * @dev STALENESS NOTE: market() returns totalBorrowAssets/totalBorrowShares as of the
+     *      last interaction (lastUpdate). Unaccrued interest since then causes the checker to
+     *      *overestimate* health factor (borrowed appears smaller than reality). In practice
+     *      this is negligible for recently-active markets, but for low-activity markets the
+     *      user should factor in a safety margin when choosing minHealthFactor. A precise
+     *      alternative would be to replicate Morpho's linear interest accrual inline, but
+     *      this would require an additional IRM call and ~200 gas of math.
+     *
      * @param morpho           The Morpho Blue contract address
      * @param marketId         The Morpho Blue market identifier
      * @param user             The position owner
@@ -146,7 +187,15 @@ abstract contract HealthFactorChecker {
                 let collValue := div(mul(collateral, collateralPrice), 0xc097ce7bc90715b34b9f1000000000)
                 let maxBorrow := div(mul(collValue, lltv), 0xde0b6b3a7640000)
 
-                // 7. Check: maxBorrow * 1e18 >= borrowed * minHealthFactor
+                // 7. Overflow-safe check: maxBorrow * 1e18 >= borrowed * minHealthFactor
+                //    LHS cannot overflow (maxBorrow bounded by uint128 collateral / 1e54).
+                //    RHS can overflow for extreme borrow * minHF products.
+                if minHealthFactor {
+                    if gt(borrowed, div(not(0), minHealthFactor)) {
+                        mstore(0x00, _HF_TOO_LOW)
+                        revert(0x00, 0x04)
+                    }
+                }
                 if lt(
                     mul(maxBorrow, 0xde0b6b3a7640000),
                     mul(borrowed, minHealthFactor)
@@ -154,6 +203,192 @@ abstract contract HealthFactorChecker {
                     mstore(0x00, _HF_TOO_LOW)
                     revert(0x00, 0x04)
                 }
+            }
+        }
+    }
+
+    /**
+     * @notice Reverts if the user's Compound V3 Comet health factor is below `minHealthFactor`.
+     *         Only checks collateral assets whose indices are set in `assetBitmap` (uint16),
+     *         avoiding iteration over all Comet assets.
+     * @param comet            The Comet contract address
+     * @param user             The position owner
+     * @param assetBitmap      Bitmap of asset indices to check (bit i = asset index i)
+     * @param minHealthFactor  Minimum acceptable health factor (18 decimals)
+     */
+    function _checkCompoundV3HealthFactor(
+        address comet,
+        address user,
+        uint256 assetBitmap,
+        uint256 minHealthFactor
+    ) internal view {
+        assembly {
+            let ptr := mload(0x40)
+
+            // 1. borrowBalanceOf(user)
+            mstore(ptr, 0x374c49b400000000000000000000000000000000000000000000000000000000)
+            mstore(add(ptr, 0x04), user)
+            if iszero(staticcall(gas(), comet, ptr, 0x24, ptr, 0x20)) {
+                returndatacopy(0, 0, returndatasize())
+                revert(0, returndatasize())
+            }
+            let borrowBal := mload(ptr)
+
+            if borrowBal {
+            // 2. baseTokenPriceFeed()
+            mstore(ptr, 0xe7dad6bd00000000000000000000000000000000000000000000000000000000)
+            if iszero(staticcall(gas(), comet, ptr, 0x04, ptr, 0x20)) {
+                returndatacopy(0, 0, returndatasize())
+                revert(0, returndatasize())
+            }
+            let baseFeed := mload(ptr)
+
+            // 3. baseScale()
+            mstore(ptr, 0x44c1e5eb00000000000000000000000000000000000000000000000000000000)
+            if iszero(staticcall(gas(), comet, ptr, 0x04, ptr, 0x20)) {
+                returndatacopy(0, 0, returndatasize())
+                revert(0, returndatasize())
+            }
+            let bScale := mload(ptr)
+
+            // 4. getPrice(baseFeed)
+            mstore(ptr, 0x41976e0900000000000000000000000000000000000000000000000000000000)
+            mstore(add(ptr, 0x04), baseFeed)
+            if iszero(staticcall(gas(), comet, ptr, 0x24, ptr, 0x20)) {
+                returndatacopy(0, 0, returndatasize())
+                revert(0, returndatasize())
+            }
+            let basePrice := mload(ptr)
+
+            // 5. borrowValue = borrowBal * basePrice / bScale
+            let borrowValue := div(mul(borrowBal, basePrice), bScale)
+
+            // 6. Iterate only asset indices whose bits are set in assetBitmap
+            let collValue := 0
+            let bitmap := and(assetBitmap, 0xffff)
+
+            for { let i := 0 } lt(i, 16) { i := add(i, 1) } {
+                if iszero(and(bitmap, shl(i, 1))) { continue }
+
+                // 6a. getAssetInfo(i) -> 256 bytes
+                mstore(ptr, 0xc8c7fe6b00000000000000000000000000000000000000000000000000000000)
+                mstore(add(ptr, 0x04), i)
+                if iszero(staticcall(gas(), comet, ptr, 0x24, ptr, 0x100)) {
+                    returndatacopy(0, 0, returndatasize())
+                    revert(0, returndatasize())
+                }
+                let asset := mload(add(ptr, 0x20))
+                let priceFeed := mload(add(ptr, 0x40))
+                let scale := mload(add(ptr, 0x60))
+                let liquidateCF := mload(add(ptr, 0xA0))
+
+                // 6b. userCollateral(user, asset)
+                mstore(ptr, 0x2b92a07d00000000000000000000000000000000000000000000000000000000)
+                mstore(add(ptr, 0x04), user)
+                mstore(add(ptr, 0x24), asset)
+                if iszero(staticcall(gas(), comet, ptr, 0x44, ptr, 0x40)) {
+                    returndatacopy(0, 0, returndatasize())
+                    revert(0, returndatasize())
+                }
+                let collBal := mload(ptr)
+
+                if collBal {
+                    // 6c. getPrice(priceFeed)
+                    mstore(ptr, 0x41976e0900000000000000000000000000000000000000000000000000000000)
+                    mstore(add(ptr, 0x04), priceFeed)
+                    if iszero(staticcall(gas(), comet, ptr, 0x24, ptr, 0x20)) {
+                        returndatacopy(0, 0, returndatasize())
+                        revert(0, returndatasize())
+                    }
+                    let price := mload(ptr)
+
+                    // weighted = collBal * price * liquidateCF / (scale * 1e18)
+                    let weighted := div(mul(mul(collBal, price), liquidateCF), mul(scale, 0xde0b6b3a7640000))
+                    collValue := add(collValue, weighted)
+                }
+            }
+
+            // 7. Overflow-safe check: collValue * 1e18 >= borrowValue * minHealthFactor
+            //    RHS can overflow for large borrow positions with high minHF.
+            if minHealthFactor {
+                if gt(borrowValue, div(not(0), minHealthFactor)) {
+                    mstore(0x00, _HF_TOO_LOW)
+                    revert(0x00, 0x04)
+                }
+            }
+            if lt(mul(collValue, 0xde0b6b3a7640000), mul(borrowValue, minHealthFactor)) {
+                mstore(0x00, _HF_TOO_LOW)
+                revert(0x00, 0x04)
+            }
+            }
+        }
+    }
+
+    /**
+     * @notice Reverts if the user's Compound V2 position is insolvent.
+     *         Uses Comptroller.getAccountLiquidity for a binary solvency check (HF >= 1.0).
+     *         Computing an exact numeric health factor would require iterating all entered
+     *         markets, which is prohibitively expensive with unknown iteration count.
+     * @param comptroller  The Comptroller contract address
+     * @param user         The position owner
+     */
+    function _checkCompoundV2Solvency(
+        address comptroller,
+        address user
+    ) internal view {
+        assembly {
+            let ptr := mload(0x40)
+
+            // getAccountLiquidity(address) → (uint error, uint liquidity, uint shortfall)
+            // selector: 0x5ec88c79
+            mstore(ptr, 0x5ec88c7900000000000000000000000000000000000000000000000000000000)
+            mstore(add(ptr, 0x04), user)
+
+            if iszero(staticcall(gas(), comptroller, ptr, 0x24, ptr, 0x60)) {
+                returndatacopy(0, 0, returndatasize())
+                revert(0, returndatasize())
+            }
+
+            let err := mload(ptr)
+            let shortfall := mload(add(ptr, 0x40))
+
+            // error != 0 or shortfall > 0 → position is insolvent
+            if or(err, shortfall) {
+                mstore(0x00, _HF_TOO_LOW)
+                revert(0x00, 0x04)
+            }
+        }
+    }
+
+    /**
+     * @notice Reverts if the user's Silo V2 position is insolvent.
+     *         Uses ISilo.isSolvent(user) for a binary solvency check. Silo V2 uses
+     *         isolated per-market positions; the silo contract checks collateral value
+     *         against borrow value using its configured oracle and liquidation threshold.
+     * @param silo  The Silo V2 vault contract address
+     * @param user  The position owner
+     */
+    function _checkSiloV2Solvency(
+        address silo,
+        address user
+    ) internal view {
+        assembly {
+            let ptr := mload(0x40)
+
+            // isSolvent(address) → bool
+            // selector: 0x38b51ce1
+            mstore(ptr, 0x38b51ce100000000000000000000000000000000000000000000000000000000)
+            mstore(add(ptr, 0x04), user)
+
+            if iszero(staticcall(gas(), silo, ptr, 0x24, ptr, 0x20)) {
+                returndatacopy(0, 0, returndatasize())
+                revert(0, returndatasize())
+            }
+
+            // isSolvent returns true (1) if solvent, false (0) if insolvent
+            if iszero(mload(ptr)) {
+                mstore(0x00, _HF_TOO_LOW)
+                revert(0x00, 0x04)
             }
         }
     }
