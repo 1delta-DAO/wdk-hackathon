@@ -165,6 +165,9 @@ abstract contract SettlementExecutor is UniversalSettlementLending {
 
         // ── Stage 4 + 5: refund excess to signer, sweep borrow fees, verify ──
         _sweepAndVerify(deltas, deltaCount, callerAddress, feeRecipient, maxFeeBps);
+
+        // ── Stage 6: post-settlement conditions (health factor, etc.) ──
+        _postSettlementCheck(callerAddress, settlementData);
     }
 
     // ── Merkle-verified action batch ────────────────────────
@@ -423,4 +426,18 @@ abstract contract SettlementExecutor is UniversalSettlementLending {
         AssetDelta[] memory deltas,
         uint256 deltaCount
     ) internal virtual returns (uint256 newDeltaCount);
+
+    /**
+     * @notice Post-settlement condition hook — called after fee sweep and zero-sum
+     *         verification, when the user's position is in its final state.
+     * @dev Override to enforce conditions such as minimum health factor.
+     *      Default implementation is a no-op.
+     *
+     * @param callerAddress  The order signer / position owner.
+     * @param settlementData The user-signed settlement parameters (extracted from orderData).
+     */
+    function _postSettlementCheck(
+        address callerAddress,
+        bytes memory settlementData
+    ) internal virtual {}
 }
