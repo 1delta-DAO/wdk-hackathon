@@ -45,6 +45,12 @@ interface IMorphoOracle {
     function price() external view returns (uint256);
 }
 
+interface IComet {
+    function supplyTo(address dst, address asset, uint256 amount) external;
+    function withdrawFrom(address src, address to, address asset, uint256 amount) external;
+    function borrowBalanceOf(address account) external view returns (uint256);
+}
+
 interface IMorpho {
     struct MarketParams {
         address loanToken;
@@ -108,6 +114,11 @@ contract HealthFactorForkTest is Test {
     address constant USDC = 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48;
     address constant WBTC = 0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599;
     address constant CBBTC = 0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf;
+
+    // Compound V3 USDC Comet
+    address constant USDC_COMET = 0xc3d688B66703497DAA19211EEdff47f25384cdc3;
+    uint256 constant COMET_WBTC_COLLATERAL = 5e6;  // 0.05 WBTC (8 decimals)
+    uint256 constant COMET_USDC_BORROW = 1000e6;    // 1000 USDC
 
     // Morpho Blue cbBTC-USDC market
     bytes32 constant MORPHO_CBBTC_USDC_MARKET = 0x64d65c9a2d91c36d56fbc42d69e979335320169b3df63bf92789e2c8883fcc64;
@@ -530,6 +541,99 @@ contract HealthFactorForkTest is Test {
     }
 
     // ═══════════════════════════════════════════════════════════════════════════════
+    //  Compound V3 Health Factor Tests
+    // ═══════════════════════════════════════════════════════════════════════════════
+
+    function _setupCompoundV3Position(uint256 collateral, uint256 borrowAmount) internal {
+        deal(WBTC, user, collateral);
+        vm.startPrank(user);
+        IERC20(WBTC).approve(USDC_COMET, collateral);
+        IComet(USDC_COMET).supplyTo(user, WBTC, collateral);
+        if (borrowAmount > 0) {
+            IComet(USDC_COMET).withdrawFrom(user, user, USDC, borrowAmount);
+        }
+        vm.stopPrank();
+    }
+
+    /// @dev Build a minimal settlement (Aave withdraw+deposit round-trip) with a Compound V3 HF condition.
+    function _buildCompoundV3ConditionSettlement(uint112 minHF) internal view returns (SettlementParams memory p) {
+        bytes memory withdrawData = abi.encodePacked(aWETH, AAVE_V3_CORE);
+        bytes memory depositData = abi.encodePacked(AAVE_V3_CORE);
+
+        bytes32 l0 = _leaf(3, 0, withdrawData);
+        bytes32 l1 = _leaf(0, 0, depositData);
+        bytes32 root = _pair(l0, l1);
+        p.merkleRoot = root;
+
+        bytes32[] memory pr0 = new bytes32[](1);
+        pr0[0] = l1;
+        bytes32[] memory pr1 = new bytes32[](1);
+        pr1[0] = l0;
+
+        // settlementData: 0 conversions + 1 Compound V3 condition (38 bytes)
+        p.settlementPayload = abi.encodePacked(
+            uint8(0),                  // numConversions = 0
+            uint8(1),                  // numConditions = 1
+            uint16(2000),              // lenderId = 2000 (Compound V3)
+            USDC_COMET,                // comet address (20 bytes)
+            uint16(0x0002),            // assetBitmap: bit 1 = WBTC at index 1
+            minHF                      // minHealthFactor (uint112, 14 bytes)
+        );
+
+        p.orderData = abi.encodePacked(root, uint16(p.settlementPayload.length), p.settlementPayload);
+
+        p.executionData = abi.encodePacked(
+            uint8(1),
+            uint8(1),
+            address(0),
+            _action(WETH, type(uint112).max, address(settlement), 3, 0, withdrawData, pr0),
+            _action(WETH, 0, user, 0, 0, depositData, pr1)
+        );
+
+        p.fillerCalldata = "";
+    }
+
+    function test_compoundV3HealthFactor_passes() public {
+        if (address(settlement) == address(0)) return;
+
+        _setupCompoundV3Position(COMET_WBTC_COLLATERAL, COMET_USDC_BORROW);
+
+        SettlementParams memory p = _buildCompoundV3ConditionSettlement(uint112(1.1e18));
+        uint48 deadline = uint48(block.timestamp + 1 hours);
+        bytes memory sig = _signOrder(userPk, p.merkleRoot, deadline, p.settlementPayload);
+        settlement.settle(0, deadline, sig, p.orderData, p.executionData, p.fillerCalldata);
+
+        assertGt(IComet(USDC_COMET).borrowBalanceOf(user), 0, "user has Compound V3 debt");
+        console.log("Compound V3 HF pass test succeeded");
+    }
+
+    function test_compoundV3HealthFactor_reverts() public {
+        if (address(settlement) == address(0)) return;
+
+        _setupCompoundV3Position(COMET_WBTC_COLLATERAL, COMET_USDC_BORROW);
+
+        SettlementParams memory p = _buildCompoundV3ConditionSettlement(uint112(50e18));
+        uint48 deadline = uint48(block.timestamp + 1 hours);
+        bytes memory sig = _signOrder(userPk, p.merkleRoot, deadline, p.settlementPayload);
+
+        vm.expectRevert(HealthFactorChecker.HealthFactorTooLow.selector);
+        settlement.settle(0, deadline, sig, p.orderData, p.executionData, p.fillerCalldata);
+    }
+
+    function test_compoundV3HealthFactor_noDebt() public {
+        if (address(settlement) == address(0)) return;
+
+        _setupCompoundV3Position(COMET_WBTC_COLLATERAL, 0);
+
+        SettlementParams memory p = _buildCompoundV3ConditionSettlement(uint112(100e18));
+        uint48 deadline = uint48(block.timestamp + 1 hours);
+        bytes memory sig = _signOrder(userPk, p.merkleRoot, deadline, p.settlementPayload);
+        settlement.settle(0, deadline, sig, p.orderData, p.executionData, p.fillerCalldata);
+
+        console.log("Compound V3 no-debt test passed: borrowBalanceOf == 0 skips HF check");
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════════
     //  Morpho Blue Health Factor Tests
     // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -728,5 +832,66 @@ contract HealthFactorForkTest is Test {
         settlement.settle(0, deadline, sig, orderData, executionData, "");
 
         console.log("Mixed conditions test passed: both Aave + Morpho HF checks succeeded");
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    //  Test 9: Mixed conditions — Aave + Compound V3 + Morpho
+    //  HF checks in the same settlementData (36 + 36 + 68 bytes)
+    // ═══════════════════════════════════════════════════════════
+
+    function test_mixedConditions_allThreeLenders() public {
+        if (address(settlement) == address(0)) return;
+
+        _setupCompoundV3Position(COMET_WBTC_COLLATERAL, COMET_USDC_BORROW);
+        _setupMorphoPosition(MORPHO_CBBTC_COLLATERAL, MORPHO_USDC_BORROW);
+
+        bytes memory withdrawData = abi.encodePacked(aWETH, AAVE_V3_CORE);
+        bytes memory depositData = abi.encodePacked(AAVE_V3_CORE);
+
+        bytes32 l0 = _leaf(3, 0, withdrawData);
+        bytes32 l1 = _leaf(0, 0, depositData);
+        bytes32 root = _pair(l0, l1);
+
+        bytes32[] memory pr0 = new bytes32[](1);
+        pr0[0] = l1;
+        bytes32[] memory pr1 = new bytes32[](1);
+        pr1[0] = l0;
+
+        // settlementData: 0 conversions + 3 conditions (Aave 36 + CompoundV3 38 + Morpho 68)
+        bytes memory settlementPayload = abi.encodePacked(
+            uint8(0),                    // numConversions = 0
+            uint8(3),                    // numConditions = 3
+            // Condition 0: Aave (36 bytes)
+            uint16(0),
+            AAVE_V3_CORE,
+            uint112(1.1e18),
+            // Condition 1: Compound V3 (38 bytes)
+            uint16(2000),
+            USDC_COMET,
+            uint16(0x0002),              // assetBitmap: bit 1 = WBTC at index 1
+            uint112(1.1e18),
+            // Condition 2: Morpho (68 bytes)
+            uint16(4000),
+            MORPHO_BLUE,
+            MORPHO_CBBTC_USDC_MARKET,
+            uint112(1.1e18)
+        );
+
+        bytes memory orderData = abi.encodePacked(root, uint16(settlementPayload.length), settlementPayload);
+
+        bytes memory executionData = abi.encodePacked(
+            uint8(1),
+            uint8(1),
+            address(0),
+            _action(WETH, type(uint112).max, address(settlement), 3, 0, withdrawData, pr0),
+            _action(WETH, 0, user, 0, 0, depositData, pr1)
+        );
+
+        uint48 deadline = uint48(block.timestamp + 1 hours);
+        bytes memory sig = _signOrder(userPk, root, deadline, settlementPayload);
+
+        settlement.settle(0, deadline, sig, orderData, executionData, "");
+
+        console.log("Mixed conditions test passed: Aave + Compound V3 + Morpho HF checks succeeded");
     }
 }

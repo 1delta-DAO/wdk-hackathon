@@ -24,13 +24,13 @@ import {UniversalSettlementLending} from "./lending/UniversalSettlementLending.s
  *    • delta > 0, totalBorrowed > 0 → borrow surplus = fee
  *        Verified: surplus × 1e7 ≤ totalBorrowed × maxFeeBps
  *        Transferred to feeRecipient.
- *    • delta > 0, totalBorrowed == 0 → non-borrow surplus → refund to signer
+ *    • delta > 0, totalBorrowed == 0 → non-borrow surplus → ignored (stays in contract)
  *    • delta < 0                     → deficit → revert (UnbalancedSettlement)
  *    • delta == 0                    → balanced → ok
  *
- *  The refund covers the case where a swap output exceeds the debt being
- *  repaid — min(balance, debt) caps the repay, and the leftover is sent
- *  back to the signer.
+ *  Non-borrow surpluses are not swept to the user — they stay in the
+ *  contract.  The solver should deposit excess into a lender for the
+ *  user via post-actions so funds remain in lending protocols.
  *
  *  Example with maxFeeBps = 50 000 (0.5%), borrow 1000 USDC:
  *    max fee = 1000 × 50 000 / 1e7 = 5 USDC
@@ -60,7 +60,7 @@ abstract contract SettlementExecutor is UniversalSettlementLending {
     /// @dev Merkle proof does not reconstruct the signed root.
     error InvalidMerkleProof();
 
-    /// @dev An asset has a negative delta or a non-borrow surplus.
+    /// @dev An asset has a negative delta (deficit).
     error UnbalancedSettlement();
 
     /// @dev Borrow surplus exceeds the user-signed percentage cap.
@@ -163,7 +163,7 @@ abstract contract SettlementExecutor is UniversalSettlementLending {
             callerAddress, merkleRoot, executionData, execOffset, numPost, deltas, deltaCount
         );
 
-        // ── Stage 4 + 5: refund excess to signer, sweep borrow fees, verify ──
+        // ── Stage 4: sweep borrow fees, verify no deficits ──
         _sweepAndVerify(deltas, deltaCount, callerAddress, feeRecipient, maxFeeBps);
 
         // ── Stage 6: post-settlement conditions (health factor, etc.) ──
@@ -298,8 +298,7 @@ abstract contract SettlementExecutor is UniversalSettlementLending {
     }
 
     /**
-     * @notice Refund non-borrow surplus to signer, sweep borrow-surplus as fee,
-     *         and verify all deltas resolve to zero.
+     * @notice Sweep borrow-surplus as fee and verify no deficits.
      *
      * @dev For each tracked asset:
      *
@@ -307,11 +306,9 @@ abstract contract SettlementExecutor is UniversalSettlementLending {
      *            Percentage-checked: surplus × 1e7 ≤ totalBorrowed × maxFeeBps
      *            Transferred to feeRecipient.
      *
-     *        delta > 0, totalBorrowed == 0 → non-borrow surplus (e.g. repay excess)
-     *            Refunded to the signer (callerAddress).
-     *            This covers the case where a swap output exceeds the debt being
-     *            repaid — min(balance, debt) caps the repay, and the leftover
-     *            belongs to the user.
+     *        delta > 0, totalBorrowed == 0 → non-borrow surplus → ignored
+     *            Funds stay in the contract. The solver is expected to deposit
+     *            excess into a lender for the user via post-actions.
      *
      *        delta < 0 → deficit → revert (UnbalancedSettlement)
      *        delta == 0 → balanced → ok
@@ -319,7 +316,7 @@ abstract contract SettlementExecutor is UniversalSettlementLending {
     function _sweepAndVerify(
         AssetDelta[] memory deltas,
         uint256 count,
-        address callerAddress,
+        address,
         address feeRecipient,
         uint256 maxFeeBps
     ) private {
@@ -342,11 +339,9 @@ abstract contract SettlementExecutor is UniversalSettlementLending {
                     if (feeRecipient != address(0)) {
                         _transferOut(deltas[i].asset, surplus, feeRecipient);
                     }
-                } else {
-                    // Non-borrow surplus (e.g. repay used less than swap output)
-                    // → refund to signer
-                    _transferOut(deltas[i].asset, surplus, callerAddress);
                 }
+                // else: non-borrow surplus — no sweep to user.
+                // Solver should deposit excess into a lender via post-actions.
             }
 
             unchecked { ++i; }
@@ -354,7 +349,7 @@ abstract contract SettlementExecutor is UniversalSettlementLending {
     }
 
     /**
-     * @notice Transfer tokens out — used for both solver fees and signer refunds.
+     * @notice Transfer tokens out — used for solver fees.
      */
     function _transferOut(address asset, uint256 amount, address recipient) private {
         assembly {

@@ -206,9 +206,9 @@ contract SettlementDeltaTest is Test {
         harness.executeSettlement(CALLER, od, ed, bytes(""));
     }
 
-    // ── Non-borrow surplus → refunded to signer ────────────
+    // ── Non-borrow surplus → no sweep, stays in contract ───
 
-    function test_nonBorrowSurplus_refundedToSigner() public {
+    function test_nonBorrowSurplus_noSweep() public {
         bytes memory d0 = hex"AA";
         bytes memory d1 = hex"BB";
 
@@ -230,8 +230,8 @@ contract SettlementDeltaTest is Test {
             _action(WETH, uint112(50), 0, d1, p1)
         );
 
-        // Surplus on a non-borrowed asset → refunded to signer (callerAddress)
-        // No revert — the 50 WETH surplus is transferred out to CALLER
+        // Non-borrow surplus is ignored — no transfer to user, no revert.
+        // Solver should deposit excess into a lender via post-actions.
         harness.executeSettlement(CALLER, od, ed, bytes(""));
     }
 

@@ -12,10 +12,11 @@ Settlement.sol (external API, EIP-712 signature verification)
   ├── settleWithFlashLoan()            — flash-loan-wrapped settlement
   |
   ├── SettlementExecutor.sol           — core executor
-  │   ├── _executeSettlement()         — orchestrates pre → intent → post → fee → verify
+  │   ├── _executeSettlement()         — orchestrates pre → intent → post → fee → conditions
   │   ├── _executeActions()            — loops actions, verifies merkle proofs
-  │   ├── _sweepFeesAndVerify()        — borrow-only fee sweep + zero-sum check
-  │   └── _executeIntent()             — virtual hook for swaps
+  │   ├── _sweepAndVerify()            — borrow-only fee sweep + deficit check
+  │   ├── _executeIntent()             — virtual hook for swaps
+  │   └── _postSettlementCheck()       — virtual hook for health factor etc.
   |
   ├── EIP712OrderVerifier.sol          — signature recovery + deadline check
   |
@@ -171,10 +172,16 @@ settlement.settleWithFlashLoan(
   │                                                              │
   └──────────────────────────────────────────────────────────────┘
                               │
-  ┌─ Stage 4: Fee Sweep ─────────────────────────────────────────┐
+  ┌─ Stage 4: Fee Sweep + Verification ──────────────────────────┐
+  │                                                              │
+  │  For each asset delta:                                       │
+  │    delta < 0 → revert (deficit)                              │
+  │    delta > 0, totalBorrowed > 0 → solver fee (%-checked)     │
+  │    delta > 0, totalBorrowed == 0 → ignored (stays in contract│
+  │    delta == 0 → balanced, ok                                 │
   │                                                              │
   │  WETH delta = 0  → balanced, skip                            │
-  │  USDC delta = +1 → positive surplus:                         │
+  │  USDC delta = +1 → borrow surplus:                           │
   │    1. Was USDC borrowed? totalBorrowed = 1 000 000 002 > 0 ✓│
   │    2. Fee check: 1 × 1e7 ≤ 1 000 000 002 × 50 000?         │
   │       10 000 000 ≤ 50 000 000 100 000  ✓                    │
@@ -182,10 +189,13 @@ settlement.settleWithFlashLoan(
   │                                                              │
   └──────────────────────────────────────────────────────────────┘
                               │
-  ┌─ Stage 5: Zero-Sum Verification ─────────────────────────────┐
+  ┌─ Stage 5: Post-Settlement Conditions ───────────────────────┐
   │                                                              │
-  │  WETH delta = 0  ✓                                          │
-  │  USDC delta = 0  ✓  (surplus was swept as fee)              │
+  │  Optional health factor checks encoded in settlementData:    │
+  │    Aave:   verify user HF ≥ minHF on the given pool         │
+  │    Morpho: verify user HF ≥ minHF on the given market       │
+  │                                                              │
+  │  If no conditions in settlementData → no-op                  │
   │                                                              │
   └──────────────────────────────────────────────────────────────┘
                               │
@@ -245,12 +255,14 @@ Each lending operation updates the delta.  Only `BORROW` operations increment
 | Condition | Action |
 |-----------|--------|
 | `delta > 0` and `totalBorrowed > 0` | Fee — transfer surplus to solver |
-| `delta > 0` and `totalBorrowed == 0` | **Revert** — non-borrow surplus is invalid |
+| `delta > 0` and `totalBorrowed == 0` | Ignored — stays in contract (no sweep to user) |
 | `delta < 0` | **Revert** — deficit |
 | `delta == 0` | Balanced — ok |
 
-A surplus from a withdrawal, deposit, or repayment is structurally impossible
-to extract as a fee.  The solver can only profit from intentional borrow excess.
+A non-borrow surplus (from a withdrawal, deposit, or repayment) is never
+transferred to the user or the solver — it stays in the contract.  The solver
+is expected to deposit any excess back into a lending protocol for the user
+via post-actions, keeping funds in protocols at all times.
 
 ### Percentage-based cap
 
@@ -286,6 +298,85 @@ passes.  If they try 10 051 USDC, it reverts with `FeeExceedsMax()`.
 Set `maxFeeBps = 0`.  Any borrow surplus — even 1 wei — will revert.  This is
 what `MigrationSettlement` uses for simple APR-validated migrations where no
 solver compensation is needed.
+
+---
+
+## Non-Borrow Surplus Handling
+
+When an asset has a positive delta but no borrow operations were performed on it
+(e.g. swap output exceeds a debt repayment), the surplus is **not** swept to the
+user.  It stays in the contract.
+
+**Why:** Funds should remain in lending protocols.  The solver is expected to
+deposit any excess back into a lender for the user via post-actions.
+
+**Example — debt repay with swap:**
+
+```
+Pre:    withdraw 1 WETH collateral
+Swap:   1 WETH → 2 327 USDT
+Pre:    repay 1 000 USDT debt
+
+Result: delta[WETH] = 0, delta[USDT] = +1 327 (non-borrow surplus)
+        → 1 327 USDT stays in contract
+        → solver adds post-action: deposit(USDT, 0=balance, user, Aave)
+        → delta[USDT] = 0  ✓
+```
+
+---
+
+## Balance-Based Swaps
+
+The swap `amountIn` in fillerCalldata supports a balance sentinel:
+
+| Value | Behaviour |
+|-------|-----------|
+| `0` | Use contract's full balance of `assetIn` at execution time |
+| `> 0` | Exact amount (solver-specified) |
+
+**Why this exists:** When withdrawing max positions, the actual withdrawn amount
+includes interest accrued between the solver's off-chain calculation and on-chain
+execution.  If the solver specifies an exact `amountIn`, a small dust remainder
+stays in the contract after the swap.  With `amountIn = 0`, all withdrawn tokens
+flow into the swap, and the oracle verification scales proportionally — preventing
+dust leaks.
+
+```
+fillerCalldata per swap:
+  [20: assetIn][20: assetOut][14: amountIn][20: target][2: calldataLen][calldata]
+
+When amountIn = 0:
+  resolved = balanceOf(settlement, assetIn)
+  Transfer resolved amount to forwarder
+  Oracle check uses resolved amount (scales correctly)
+```
+
+**Solver guidance:**
+- Use `amountIn = 0` after max withdrawals to capture all tokens including dust
+- Use exact amounts for partial swaps or multi-hop routes
+
+---
+
+## Post-Settlement Conditions
+
+After the fee sweep, the executor calls `_postSettlementCheck()` to verify
+user-signed conditions on the final position state.
+
+**Format** (appended to settlementData after conversion params):
+
+```
+[1: numConditions]
+[per condition — variable size]:
+  Aave   (lenderId 0–1999):   [2: lenderId][20: pool][14: minHF]         = 36 bytes
+  Morpho (lenderId 4000–4999): [2: lenderId][20: morpho][32: marketId][14: minHF] = 68 bytes
+```
+
+If no conditions are present (settlementData ends at conversions), the check is
+a no-op.
+
+**Health factor encoding:** `minHF` is a 14-byte uint112 in WAD (1e18 = 1.0).
+For example, `1.5e18` requires the user's health factor to be at least 1.5 after
+the settlement completes.
 
 ---
 
@@ -335,7 +426,7 @@ MigrationOrder {
 
 - **merkleRoot** — covers all approved lending actions
 - **deadline** — order expiry (block.timestamp must be ≤ deadline)
-- **settlementData** — intent parameters (swap constraints, APR check config, etc.)
+- **settlementData** — intent parameters (swap constraints, health factor conditions, etc.)
 
 The contract recovers the signer via `ecrecover` and uses it as the position
 owner (`callerAddress`) for all lending operations.  This ensures:
@@ -375,10 +466,18 @@ owner (`callerAddress`) for all lending operations.  This ensures:
 
 ### Amount Sentinels
 
+**Lending actions** (in executionData):
+
 | Value | Meaning |
 |-------|---------|
 | `0` | Contract's current balance of the asset |
 | `type(uint112).max` | Protocol-specific "safe max" (full user position) |
+
+**Swap amountIn** (in fillerCalldata):
+
+| Value | Meaning |
+|-------|---------|
+| `0` | Contract's full balance of `assetIn` (prevents dust from max withdrawals) |
 
 ### Lender Data Formats
 
@@ -404,7 +503,7 @@ owner (`callerAddress`) for all lending operations.  This ensures:
 
 ```
 settlement/
-├── Settlement.sol                      External API + EIP-712 + DEX intent
+├── Settlement.sol                      External API + EIP-712 + DEX intent + conditions
 ├── MigrationSettlement.sol             Aave V3 APR-validated migration
 ├── SettlementExecutor.sol              Core: merkle verify + delta accounting + fee sweep
 ├── SettlementForwarder.sol             Isolated DEX execution sandbox
@@ -412,6 +511,12 @@ settlement/
 ├── apr/
 │   ├── AaveV3AprChecker.sol            Borrow rate comparison
 │   └── IAaveV3Pool.sol                 Aave V3 pool interface
+├── conditions/
+│   └── HealthFactorChecker.sol         Aave + Morpho health factor verification
+├── oracle/
+│   ├── SwapVerifier.sol                Oracle-verified swap output check
+│   ├── AaveOracleAdapter.sol           Aave oracle → ISettlementPriceOracle
+│   └── ISettlementPriceOracle.sol      Oracle interface
 ├── lending/
 │   ├── UniversalSettlementLending.sol  Lending router (returns assetUsed + amounts)
 │   ├── AaveSettlementLending.sol       Aave V2/V3 operations

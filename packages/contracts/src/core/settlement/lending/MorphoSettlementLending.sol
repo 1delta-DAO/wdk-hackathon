@@ -164,6 +164,7 @@ abstract contract MorphoSettlementLending is ERC20Selectors, Masks {
                 mstore(add(ptr, 196), amount)
             }
 
+            if amount {
             let morpho := shr(96, mload(add(d, 97)))
 
             let inputCalldataLength := and(UINT16_MASK, shr(240, mload(add(d, 117))))
@@ -192,6 +193,7 @@ abstract contract MorphoSettlementLending is ERC20Selectors, Masks {
             }
 
             amountIn := amount
+            } // if amount
         }
     }
 
@@ -241,6 +243,7 @@ abstract contract MorphoSettlementLending is ERC20Selectors, Masks {
                 mstore(ptr, LISTA_PROVIDER_SUPPLY_COLLATERAL)
             }
 
+            if amount {
             mstore(add(ptr, 4), shr(96, mload(d)))
             mstore(add(ptr, 36), shr(96, mload(add(d, 20))))
             mstore(add(ptr, 68), shr(96, mload(add(d, 40))))
@@ -288,6 +291,7 @@ abstract contract MorphoSettlementLending is ERC20Selectors, Masks {
             }
 
             amountIn := amount
+            } // if amount
         }
     }
 
