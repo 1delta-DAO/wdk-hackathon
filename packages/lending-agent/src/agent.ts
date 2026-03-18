@@ -14,14 +14,24 @@ export async function runAgentLoop (
   const model = process.env.MODEL ?? 'claude-opus-4-6'
   const supportsThinking = /opus-4|sonnet-4/.test(model)
 
-  const createParams = (): Anthropic.MessageCreateParamsNonStreaming => ({
-    model,
-    max_tokens: 8192,
-    ...(supportsThinking ? { thinking: { type: 'adaptive' } } : {}),
-    system: systemPrompt,
-    tools: allTools,
-    messages
-  })
+  const cachedSystem: Anthropic.TextBlockParam[] = [
+    { type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } }
+  ]
+  const cachedTools: Anthropic.Tool[] = allTools.length === 0 ? [] : [
+    ...allTools.slice(0, -1),
+    { ...allTools[allTools.length - 1], cache_control: { type: 'ephemeral' } }
+  ]
+
+  const createParams = (): Anthropic.MessageCreateParamsNonStreaming => {
+    return {
+      model,
+      max_tokens: 8192,
+      ...(supportsThinking ? { thinking: { type: 'adaptive' } } : {}),
+      system: cachedSystem,
+      tools: cachedTools,
+      messages
+    }
+  }
 
   let response = await anthropic.messages.create(createParams())
   let turns = 0
