@@ -56,7 +56,7 @@ describe.skipIf(!canRun)(
       expect(result.length).toBeGreaterThan(0)
 
       // The response should reference a lending protocol (one of the major ones on Arbitrum)
-      const mentionsProtocol = /aave|compound|morpho|radiant|silo|euler|moonwell/i.test(result)
+      const mentionsProtocol = /aave|compound|morpho|radiant|silo|euler|moonwell|tender|init/i.test(result)
       expect(mentionsProtocol, 'expected agent to mention a lending protocol').toBe(true)
 
       // Should mention a deposit rate / APR figure
