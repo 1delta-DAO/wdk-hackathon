@@ -194,6 +194,7 @@ abstract contract SiloV2SettlementLending is ERC20Selectors, Masks {
                 amount := mload(0x0)
             }
 
+            if amount {
             let ptr := mload(0x40)
             mstore(add(ptr, 0x24), receiver)
 
@@ -217,6 +218,7 @@ abstract contract SiloV2SettlementLending is ERC20Selectors, Masks {
             }
 
             amountIn := amount
+            } // if amount
         }
     }
 

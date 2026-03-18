@@ -249,6 +249,7 @@ abstract contract CompoundV2SettlementLending is ERC20Selectors, Masks {
             case 0 {
                 if iszero(amount) { amount := selfbalance() }
 
+                if amount {
                 switch selectorId
                 case 2 {
                     // mint(address)
@@ -294,6 +295,7 @@ abstract contract CompoundV2SettlementLending is ERC20Selectors, Masks {
                         }
                     }
                 }
+                } // if amount
             }
             default {
                 if iszero(amount) {
@@ -306,6 +308,7 @@ abstract contract CompoundV2SettlementLending is ERC20Selectors, Masks {
                     amount := mload(0x0)
                 }
 
+                if amount {
                 let ptr := mload(0x40)
 
                 switch selectorId
@@ -375,6 +378,7 @@ abstract contract CompoundV2SettlementLending is ERC20Selectors, Masks {
                     }
                 }
                 default { revert(0, 0) }
+                } // if amount
             }
 
             amountIn := amount

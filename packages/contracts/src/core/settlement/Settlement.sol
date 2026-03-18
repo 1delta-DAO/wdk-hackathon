@@ -260,6 +260,12 @@ contract Settlement is
                 }
                 amountIn := mload(ptr)
             }
+            // Nothing to swap — skip (delta unchanged)
+            if (amountIn == 0) {
+                newDeltaCount = deltaCount;
+                fcConsumed = 76 + swapCalldataLen;
+                return (newDeltaCount, fcConsumed);
+            }
         }
 
         // ── Execute the swap ──

@@ -151,18 +151,20 @@ abstract contract CompoundV3SettlementLending is ERC20Selectors, Masks {
                 amount := mload(0x0)
             }
 
-            let ptr := mload(0x40)
-            // supplyTo(address,address,uint256)
-            mstore(ptr, 0x4232cd6300000000000000000000000000000000000000000000000000000000)
-            mstore(add(ptr, 0x04), receiver)
-            mstore(add(ptr, 0x24), asset)
-            mstore(add(ptr, 0x44), amount)
-            if iszero(call(gas(), comet, 0x0, ptr, 0x64, 0x0, 0x0)) {
-                returndatacopy(0x0, 0x0, returndatasize())
-                revert(0x0, returndatasize())
-            }
+            if amount {
+                let ptr := mload(0x40)
+                // supplyTo(address,address,uint256)
+                mstore(ptr, 0x4232cd6300000000000000000000000000000000000000000000000000000000)
+                mstore(add(ptr, 0x04), receiver)
+                mstore(add(ptr, 0x24), asset)
+                mstore(add(ptr, 0x44), amount)
+                if iszero(call(gas(), comet, 0x0, ptr, 0x64, 0x0, 0x0)) {
+                    returndatacopy(0x0, 0x0, returndatasize())
+                    revert(0x0, returndatasize())
+                }
 
-            amountIn := amount
+                amountIn := amount
+            }
         }
     }
 
