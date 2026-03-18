@@ -136,6 +136,148 @@ abstract contract SettlementExecutor is UniversalSettlementLending {
         }
     }
 
+    // ── Signature-Based Authorizations ──────────────────────
+
+    /**
+     * @notice Forward an ERC-2612 permit to a token contract.
+     * @dev Allows solvers to batch user permits with settlements via multicall.
+     *      Silently succeeds if the permit reverts (e.g. already used nonce)
+     *      so that multicall bundles remain idempotent.
+     */
+    function permit(
+        address token,
+        address owner,
+        address spender,
+        uint256 value,
+        uint256 deadline,
+        uint8 v,
+        bytes32 r,
+        bytes32 s
+    ) external {
+        // permit(address,address,uint256,uint256,uint8,bytes32,bytes32)
+        assembly {
+            let ptr := mload(0x40)
+            mstore(ptr, 0xd505accf00000000000000000000000000000000000000000000000000000000)
+            mstore(add(ptr, 0x04), owner)
+            mstore(add(ptr, 0x24), spender)
+            mstore(add(ptr, 0x44), value)
+            mstore(add(ptr, 0x64), deadline)
+            mstore(add(ptr, 0x84), v)
+            mstore(add(ptr, 0xa4), r)
+            mstore(add(ptr, 0xc4), s)
+            // Best-effort: don't revert if permit fails (nonce already consumed, etc.)
+            pop(call(gas(), token, 0, ptr, 0xe4, 0, 0))
+        }
+    }
+
+    /**
+     * @notice Forward a Morpho Blue setAuthorizationWithSig call.
+     * @dev Allows solvers to bundle Morpho authorization with settlements.
+     *
+     * @param morpho     Morpho Blue contract address.
+     * @param authorizer The user granting authorization.
+     * @param authorized The address being authorized (typically this contract).
+     * @param isAuthorized Whether to grant or revoke.
+     * @param nonce      The authorizer's current nonce on Morpho.
+     * @param deadline   Signature expiry timestamp.
+     * @param v          Signature component.
+     * @param r          Signature component.
+     * @param s          Signature component.
+     */
+    function morphoSetAuthorizationWithSig(
+        address morpho,
+        address authorizer,
+        address authorized,
+        bool isAuthorized,
+        uint256 nonce,
+        uint256 deadline,
+        uint8 v,
+        bytes32 r,
+        bytes32 s
+    ) external {
+        // setAuthorizationWithSig(Authorization(authorizer,authorized,isAuthorized,nonce,deadline), Signature(v,r,s))
+        // Authorization struct is encoded inline (not as a tuple pointer for this low-level call)
+        assembly {
+            let ptr := mload(0x40)
+            // setAuthorizationWithSig((address,address,bool,uint256,uint256),(uint8,bytes32,bytes32)) = 0x8069218f
+            mstore(ptr, 0x8069218f00000000000000000000000000000000000000000000000000000000)
+            // Authorization struct fields (5 × 32 bytes at offsets 0x04..0xa4)
+            mstore(add(ptr, 0x04), authorizer)
+            mstore(add(ptr, 0x24), authorized)
+            mstore(add(ptr, 0x44), isAuthorized)
+            mstore(add(ptr, 0x64), nonce)
+            mstore(add(ptr, 0x84), deadline)
+            // Signature struct fields (3 × 32 bytes at offsets 0xa4..0x104)
+            mstore(add(ptr, 0xa4), v)
+            mstore(add(ptr, 0xc4), r)
+            mstore(add(ptr, 0xe4), s)
+            // Best-effort
+            pop(call(gas(), morpho, 0, ptr, 0x104, 0, 0))
+        }
+    }
+
+    /**
+     * @notice Forward a Compound V3 allowBySig call.
+     * @dev Allows solvers to bundle Comet manager authorization with settlements.
+     */
+    function compoundV3AllowBySig(
+        address comet,
+        address owner,
+        address manager,
+        bool isAllowed,
+        uint256 nonce,
+        uint256 expiry,
+        uint8 v,
+        bytes32 r,
+        bytes32 s
+    ) external {
+        // allowBySig(address,address,bool,uint256,uint256,uint8,bytes32,bytes32) = 0xbb24d994
+        assembly {
+            let ptr := mload(0x40)
+            mstore(ptr, 0xbb24d99400000000000000000000000000000000000000000000000000000000)
+            mstore(add(ptr, 0x04), owner)
+            mstore(add(ptr, 0x24), manager)
+            mstore(add(ptr, 0x44), isAllowed)
+            mstore(add(ptr, 0x64), nonce)
+            mstore(add(ptr, 0x84), expiry)
+            mstore(add(ptr, 0xa4), v)
+            mstore(add(ptr, 0xc4), r)
+            mstore(add(ptr, 0xe4), s)
+            // Best-effort
+            pop(call(gas(), comet, 0, ptr, 0x104, 0, 0))
+        }
+    }
+
+    /**
+     * @notice Forward an Aave V3 delegationWithSig call to a debt token.
+     * @dev Allows solvers to bundle credit delegation with settlements.
+     */
+    function aaveDelegationWithSig(
+        address debtToken,
+        address delegator,
+        address delegatee,
+        uint256 value,
+        uint256 deadline,
+        uint8 v,
+        bytes32 r,
+        bytes32 s
+    ) external {
+        // delegationWithSig(address,address,uint256,uint256,uint8,bytes32,bytes32)
+        assembly {
+            let ptr := mload(0x40)
+            mstore(ptr, 0x0b52d55800000000000000000000000000000000000000000000000000000000)
+            mstore(add(ptr, 0x04), delegator)
+            mstore(add(ptr, 0x24), delegatee)
+            mstore(add(ptr, 0x44), value)
+            mstore(add(ptr, 0x64), deadline)
+            mstore(add(ptr, 0x84), v)
+            mstore(add(ptr, 0xa4), r)
+            mstore(add(ptr, 0xc4), s)
+            // Best-effort
+            pop(call(gas(), debtToken, 0, ptr, 0xe4, 0, 0))
+        }
+    }
+
     // ── Settlement entry point ──────────────────────────────
 
     /**
