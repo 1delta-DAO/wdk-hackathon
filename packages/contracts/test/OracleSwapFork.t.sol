@@ -449,8 +449,8 @@ contract OracleSwapSettlementForkTest is Test {
         //   Pre repay:  -userDebt USDT (delta[USDT] = -userDebt)
         //   Pre withdraw: +1 WETH  (delta[WETH] = +1)
         //   Swap:        -1 WETH, +swapOutput USDT (~2327) -> delta[WETH] = 0
-        //   USDT delta = -userDebt + swapOutput > 0 (non-borrow surplus -> refunded to user)
-        //   Flash loan takes userDebt, excess refunded to signer
+        //   USDT delta = -userDebt + swapOutput > 0 (non-borrow surplus, stays in contract)
+        //   In production, solver would add a post-action to deposit excess into a lender.
 
         bytes memory executionData = abi.encodePacked(
             uint8(2), uint8(0), address(0), // 2 pre, 0 post, no fee recipient
@@ -480,33 +480,32 @@ contract OracleSwapSettlementForkTest is Test {
         // ── Verify results ──
         uint256 aWethAfter = IERC20(aWETH).balanceOf(user);
         uint256 debtAfter = IERC20(vDebtUSDT).balanceOf(user);
-        uint256 aUsdtAfter = IERC20(aUSDT).balanceOf(user);
 
         uint256 userUsdtBalance = IERC20(USDT).balanceOf(user);
+        uint256 settlementUsdtBalance = IERC20(USDT).balanceOf(address(settlement));
 
         console.log("--- Post-settlement ---");
         console.log("User aWETH      :", aWethAfter);
         console.log("User USDT debt  :", debtAfter);
         console.log("User USDT wallet:", userUsdtBalance);
-        console.log("Settlement WETH :", IERC20(WETH).balanceOf(address(settlement)));
-        console.log("Settlement USDT :", IERC20(USDT).balanceOf(address(settlement)));
+        console.log("Settlement USDT :", settlementUsdtBalance);
 
         // All WETH collateral swapped to USDT
         assertEq(aWethAfter, 0, "all WETH swapped away");
 
-        // Debt fully repaid — no new borrow, swap covers the flash loan
+        // Debt fully repaid
         assertEq(debtAfter, 0, "user debt should be zero");
 
-        // User received refund: swap produced ~2327 USDT, flash loan took ~1000 USDT,
-        // excess (~1327 USDT) was refunded to user as raw USDT (non-borrow surplus refund)
-        // User also had the initial borrow amount (1000 USDT) in their wallet
-        uint256 expectedRefund = expectedUsdt - userDebt;
-        assertApproxEqAbs(userUsdtBalance, expectedRefund + borrowAmount, 5, "user got USDT refund");
-        console.log("User USDT refund (swap excess):", expectedRefund);
+        // Excess USDT stays in settlement contract (no sweep to user).
+        // In production the solver would deposit this into a lender via post-actions.
+        uint256 expectedExcess = expectedUsdt - userDebt;
+        assertApproxEqAbs(settlementUsdtBalance, expectedExcess, 5, "excess USDT stays in settlement");
 
-        // Settlement should be clean
+        // User only has the original borrow amount — no refund
+        assertApproxEqAbs(userUsdtBalance, borrowAmount, 5, "user got no refund");
+
+        // No WETH left
         assertEq(IERC20(WETH).balanceOf(address(settlement)), 0, "no WETH left");
-        assertEq(IERC20(USDT).balanceOf(address(settlement)), 0, "no USDT left");
 
         console.log("Flash loan + oracle swap completed successfully!");
     }

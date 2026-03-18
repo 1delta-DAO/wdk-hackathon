@@ -39,6 +39,9 @@ import {SettlementForwarder} from "./SettlementForwarder.sol";
  *        [20: assetIn][20: assetOut][14: amountIn]
  *        [20: target][2: calldataLen][calldataLen: calldata]
  *
+ *  amountIn sentinels:
+ *    0 — contract's full balance of assetIn (prevents dust from max withdrawals)
+ *
  *  The conversions are matched in order: conversion 0 in settlementData
  *  is paired with swap 0 in fillerCalldata.  The assetIn/assetOut in both
  *  MUST match — the contract verifies this.
@@ -243,6 +246,21 @@ contract Settlement is
 
         // Verify asset pair matches user-signed config
         if (fcAssetIn != sdAssetIn || fcAssetOut != sdAssetOut) revert ConversionMismatch();
+
+        // ── Resolve balance sentinel ──
+        // amountIn = 0 → use contract's full balance of assetIn (prevents dust leaks)
+        if (amountIn == 0) {
+            assembly {
+                let ptr := mload(0x40)
+                mstore(ptr, 0x70a0823100000000000000000000000000000000000000000000000000000000)
+                mstore(add(ptr, 4), address())
+                if iszero(staticcall(gas(), fcAssetIn, ptr, 0x24, ptr, 0x20)) {
+                    returndatacopy(0, 0, returndatasize())
+                    revert(0, returndatasize())
+                }
+                amountIn := mload(ptr)
+            }
+        }
 
         // ── Execute the swap ──
         uint256 amountOut = _forwardSwap(fcAssetIn, fcAssetOut, amountIn, target, fillerCalldata, fcOffset, swapCalldataLen);
