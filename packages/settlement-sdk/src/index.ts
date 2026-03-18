@@ -42,3 +42,42 @@ export type {
   ClosePositionParams,
   CrossProtocolMigrationParams,
 } from './flows.js'
+
+// Permits, signatures & multicall encoding
+export {
+  // Typed data definitions (for signTypedData)
+  PermitTypedData,
+  MorphoAuthorizationTypedData,
+  CompoundV3AuthorizationTypedData,
+  AaveDelegationTypedData,
+  SettlementOrderTypedData,
+  // Message builders
+  buildPermitMessage,
+  buildMorphoAuthMessage,
+  buildCompoundV3AuthMessage,
+  buildAaveDelegationMessage,
+  buildSettlementOrderMessage,
+  // Domain builders
+  permitDomain,
+  morphoDomain,
+  compoundV3Domain,
+  aaveDelegationDomain,
+  settlementDomain,
+  // Multicall calldata encoders
+  encodePermitCall,
+  encodeMorphoAuthCall,
+  encodeCompoundV3AuthCall,
+  encodeAaveDelegationCall,
+  // ABI fragments
+  multicallAbi,
+  settleWithFlashLoanAbi,
+} from './permits.js'
+export type {
+  SplitSignature,
+  TypedDataDomain,
+  PermitMessage,
+  MorphoAuthMessage,
+  CompoundV3AuthMessage,
+  AaveDelegationMessage,
+  SettlementOrderMessage,
+} from './permits.js'
