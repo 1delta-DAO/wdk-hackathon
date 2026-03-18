@@ -237,16 +237,13 @@ contract OracleSwapSettlementForkTest is Test {
         IAaveV3Pool.ReserveDataLegacy memory wbtcData = IPool(AAVE_V3_CORE).getReserveData(WBTC);
         aWBTC = wbtcData.aTokenAddress;
 
-        // Settlement approvals
-        vm.startPrank(address(settlement));
-        IERC20(WETH).approve(AAVE_V3_CORE, type(uint256).max);
-        IERC20(USDC).approve(AAVE_V3_CORE, type(uint256).max);
-        IERC20(USDC).approve(MORPHO_BLUE, type(uint256).max);
-        IERC20(WBTC).approve(AAVE_V3_CORE, type(uint256).max);
-        // USDT non-standard approve (no return value) — use low-level call
-        (bool ok,) = USDT.call(abi.encodeWithSelector(IERC20.approve.selector, AAVE_V3_CORE, type(uint256).max));
-        require(ok, "USDT approve failed");
-        vm.stopPrank();
+        // Settlement approvals (via approveToken — no prank needed)
+        settlement.approveToken(WETH, AAVE_V3_CORE, type(uint256).max);
+        settlement.approveToken(USDC, AAVE_V3_CORE, type(uint256).max);
+        settlement.approveToken(USDC, MORPHO_BLUE, type(uint256).max);
+        settlement.approveToken(WBTC, AAVE_V3_CORE, type(uint256).max);
+        // USDT non-standard approve — approveToken handles it (assembly approve)
+        settlement.approveToken(USDT, AAVE_V3_CORE, type(uint256).max);
 
         // Forwarder approves the mock swapper for WETH (so it can pull)
         address fwd = address(settlement.forwarder());
@@ -409,9 +406,7 @@ contract OracleSwapSettlementForkTest is Test {
         vm.stopPrank();
 
         // Settlement needs USDT approval for Morpho flash loan repayment
-        vm.prank(address(settlement));
-        (bool ok2,) = USDT.call(abi.encodeWithSelector(IERC20.approve.selector, MORPHO_BLUE, type(uint256).max));
-        require(ok2);
+        settlement.approveToken(USDT, MORPHO_BLUE, type(uint256).max);
 
         // ── Build merkle tree: 2 leaves ──
         // All WETH is swapped to USDT. No post-actions needed —

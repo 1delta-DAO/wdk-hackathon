@@ -209,13 +209,11 @@ contract HealthFactorForkTest is Test {
         IAaveV3Pool.ReserveDataLegacy memory usdcData = IPool(AAVE_V3_CORE).getReserveData(USDC);
         vDebtUSDC = usdcData.variableDebtTokenAddress;
 
-        // Settlement approvals
-        vm.startPrank(address(settlement));
-        IERC20(WETH).approve(AAVE_V3_CORE, type(uint256).max);
-        IERC20(USDC).approve(AAVE_V3_CORE, type(uint256).max);
-        IERC20(USDC).approve(MORPHO_BLUE, type(uint256).max);
-        IERC20(WBTC).approve(AAVE_V3_CORE, type(uint256).max);
-        vm.stopPrank();
+        // Settlement approvals (via approveToken — no prank needed)
+        settlement.approveToken(WETH, AAVE_V3_CORE, type(uint256).max);
+        settlement.approveToken(USDC, AAVE_V3_CORE, type(uint256).max);
+        settlement.approveToken(USDC, MORPHO_BLUE, type(uint256).max);
+        settlement.approveToken(WBTC, AAVE_V3_CORE, type(uint256).max);
 
         // Forwarder approves the mock swapper
         address fwd = address(settlement.forwarder());
