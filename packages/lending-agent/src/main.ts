@@ -2,12 +2,94 @@ import type Anthropic from '@anthropic-ai/sdk'
 import { TOKEN, AMOUNT, CHAIN_FILTER, DRY_RUN } from './config.js'
 import { connectOneDelta, connectWdk, callTool, toAnthropicTools, createRouter } from './mcp.js'
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js'
-import { buildSystemPrompt } from './prompt.js'
+import { buildSystemPrompt, buildIntentSystemPrompt } from './prompt.js'
 import { runAgentLoop } from './agent.js'
 
 export interface AgentClients {
   oneDeltaClient: Client
   wdkClient: Client
+}
+
+/**
+ * Represents a user's signed lending intent — the onchain order object
+ * submitted to the intent contract. The agent uses this to constrain its
+ * market search and produce the optimized calldata.
+ */
+export interface LendingIntent {
+  /** EIP-712 signature from the user over this intent — validated onchain */
+  signature: string
+  /** Chain to optimize the position on */
+  chainId: number
+  /** Token address the user is supplying as collateral */
+  collateralToken: string
+  /** Token address the user wants to borrow */
+  debtToken: string
+  /** Lender IDs the user permits — agent must not select outside this set */
+  allowedLenders: string[]
+  /** Amount to deposit, denominated in USD */
+  usdAmount: string
+}
+
+export async function runAgentWithIntent (clients: AgentClients, intent: LendingIntent): Promise<string> {
+  const { oneDeltaClient, wdkClient } = clients
+
+  const [{ tools: oneDeltaTools }, { tools: wdkTools }] = await Promise.all([
+    oneDeltaClient.listTools(),
+    wdkClient.listTools(),
+  ])
+
+  const oneDeltaNeeded = new Set([
+    'find_market',
+    'convert_amount',
+    'get_deposit_calldata',
+    ...(intent.debtToken ? ['get_borrow_calldata'] : []),
+    'get_lender_ids', // agent may need this to resolve lender IDs
+  ])
+  const wdkNeeded = new Set(['getAddress', 'sendTransaction'])
+
+  const filteredOneDelta = oneDeltaTools.filter(t => oneDeltaNeeded.has(t.name))
+  const filteredWdk = wdkTools.filter(t => wdkNeeded.has(t.name))
+
+  const toolClientMap = Object.fromEntries([
+    ...filteredOneDelta.map(t => [t.name, oneDeltaClient] as const),
+    ...filteredWdk.map(t => [t.name, wdkClient] as const),
+  ])
+
+  const allTools: Anthropic.Tool[] = [
+    ...toAnthropicTools(filteredOneDelta),
+    ...toAnthropicTools(filteredWdk),
+  ]
+
+  let walletAddress = ''
+  try {
+    walletAddress = await callTool(wdkClient, 'getAddress', { chain: 'ethereum' })
+  } catch (err) {
+    console.warn('Could not fetch wallet address:', err instanceof Error ? err.message : err)
+  }
+
+  const systemPrompt = buildIntentSystemPrompt(walletAddress, intent)
+  const userMessage = [
+    `Optimize a lending position on chain ${intent.chainId}.`,
+    `Collateral token: ${intent.collateralToken}`,
+    intent.debtToken ? `Debt token: ${intent.debtToken}` : null,
+    `Allowed lenders: ${intent.allowedLenders.join(', ')}`,
+  ].filter(Boolean).join('\n')
+
+  console.log(`\nIntent task:\n${userMessage}\n`)
+
+  const router = createRouter(toolClientMap)
+  const messages: Anthropic.MessageParam[] = [{ role: 'user', content: userMessage }]
+  const finalResponse = await runAgentLoop(router, systemPrompt, allTools, messages)
+
+  const resultText = finalResponse.content
+    .filter((b): b is Anthropic.TextBlock => b.type === 'text')
+    .map(b => b.text)
+    .join('')
+
+  console.log('\n=== Agent Result ===')
+  console.log(resultText)
+
+  return resultText
 }
 
 export async function runAgent (clients: AgentClients): Promise<string> {
