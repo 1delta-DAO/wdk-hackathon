@@ -7,6 +7,8 @@ import {MoolahSettlementCallback} from "./flash-loan/MoolahSettlementCallback.so
 import {MorphoFlashLoans} from "./flash-loan/Morpho.sol";
 import {EIP712OrderVerifier} from "./EIP712OrderVerifier.sol";
 import {SwapVerifier} from "./oracle/SwapVerifier.sol";
+import {HealthFactorChecker} from "./conditions/HealthFactorChecker.sol";
+import {LenderIds} from "./lending/DeltaEnums.sol";
 import {SettlementForwarder} from "./SettlementForwarder.sol";
 
 /**
@@ -27,6 +29,9 @@ import {SettlementForwarder} from "./SettlementForwarder.sol";
  *    [1: numConversions]
  *    [per conversion (68 bytes)]:
  *        [20: assetIn][20: assetOut][20: oracle][8: swapTolerance]
+ *    [optional 1: numConditions]
+ *    [optional per condition (36 bytes)]:
+ *        [2: lenderId][20: pool][14: minHealthFactor]
  *
  *  fillerCalldata format (solver-provided):
  *    [per conversion]:
@@ -57,7 +62,8 @@ contract Settlement is
     MorphoSettlementCallback,
     MoolahSettlementCallback,
     EIP712OrderVerifier,
-    SwapVerifier
+    SwapVerifier,
+    HealthFactorChecker
 {
     SettlementForwarder public immutable forwarder;
 
@@ -315,6 +321,59 @@ contract Settlement is
                 revert(0, returndatasize())
             }
             amountOut := sub(mload(ptr), balBefore)
+        }
+    }
+
+    // ── Post-Settlement Conditions ───────────────────────
+
+    /**
+     * @notice Verifies post-settlement conditions encoded in the tail of settlementData.
+     * @dev Format after conversion data:
+     *        [1: numConditions]
+     *        [per condition (36 bytes)]:
+     *            [2: lenderId][20: pool][14: minHealthFactor]
+     *
+     *      If settlementData ends at the conversion section, no conditions are checked.
+     *      Routes by lenderId using LenderIds thresholds (same as lending operations).
+     */
+    function _postSettlementCheck(
+        address callerAddress,
+        bytes memory settlementData
+    ) internal view override {
+        uint256 numConversions;
+        assembly {
+            numConversions := shr(248, mload(add(settlementData, 0x20)))
+        }
+
+        uint256 conditionsOffset = 1 + numConversions * 68;
+
+        if (settlementData.length <= conditionsOffset) return;
+
+        uint256 numConditions;
+        assembly {
+            numConditions := shr(248, mload(add(add(settlementData, 0x20), conditionsOffset)))
+        }
+
+        uint256 cursor = conditionsOffset + 1;
+
+        for (uint256 i; i < numConditions;) {
+            uint256 lenderId;
+            address pool;
+            uint256 minHF;
+
+            assembly {
+                let ptr := add(add(settlementData, 0x20), cursor)
+                lenderId := and(0xffff, shr(240, mload(ptr)))
+                pool := shr(96, mload(add(ptr, 2)))
+                minHF := shr(144, mload(add(ptr, 22)))
+            }
+
+            if (lenderId < LenderIds.UP_TO_AAVE_V2) {
+                _checkAaveHealthFactor(pool, callerAddress, minHF);
+            }
+
+            cursor += 36;
+            unchecked { ++i; }
         }
     }
 }
