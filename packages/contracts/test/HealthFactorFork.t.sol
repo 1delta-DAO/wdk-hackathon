@@ -41,6 +41,45 @@ interface IWETH {
     function deposit() external payable;
 }
 
+interface IMorphoOracle {
+    function price() external view returns (uint256);
+}
+
+interface IMorpho {
+    struct MarketParams {
+        address loanToken;
+        address collateralToken;
+        address oracle;
+        address irm;
+        uint256 lltv;
+    }
+
+    function supplyCollateral(MarketParams memory marketParams, uint256 assets, address onBehalfOf, bytes memory data)
+        external;
+    function borrow(
+        MarketParams memory marketParams,
+        uint256 assets,
+        uint256 shares,
+        address onBehalfOf,
+        address receiver
+    ) external returns (uint256, uint256);
+    function position(bytes32 id, address user)
+        external
+        view
+        returns (uint256 supplyShares, uint128 borrowShares, uint128 collateral);
+    function market(bytes32 id)
+        external
+        view
+        returns (
+            uint128 totalSupplyAssets,
+            uint128 totalSupplyShares,
+            uint128 totalBorrowAssets,
+            uint128 totalBorrowShares,
+            uint128 lastUpdate,
+            uint128 fee
+        );
+}
+
 contract FixedRateSwapper {
     ISettlementPriceOracle public oracle;
 
@@ -68,6 +107,13 @@ contract HealthFactorForkTest is Test {
     address constant WETH = 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2;
     address constant USDC = 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48;
     address constant WBTC = 0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599;
+    address constant CBBTC = 0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf;
+
+    // Morpho Blue cbBTC-USDC market
+    bytes32 constant MORPHO_CBBTC_USDC_MARKET = 0x64d65c9a2d91c36d56fbc42d69e979335320169b3df63bf92789e2c8883fcc64;
+    address constant MORPHO_CBBTC_ORACLE = 0xA6D6950c9F177F1De7f7757FB33539e3Ec60182a;
+    address constant MORPHO_CBBTC_IRM = 0x870aC11D48B15DB9a138Cf899d20F13F79Ba00BC;
+    uint256 constant MORPHO_CBBTC_LLTV = 860000000000000000;
 
     bytes32 constant MIGRATION_ORDER_TYPEHASH =
         keccak256("MigrationOrder(bytes32 merkleRoot,uint48 deadline,bytes settlementData)");
@@ -84,6 +130,8 @@ contract HealthFactorForkTest is Test {
     address vDebtUSDC;
 
     uint256 constant USER_COLLATERAL = 1 ether;
+    uint256 constant MORPHO_CBBTC_COLLATERAL = 1e7; // 0.1 cbBTC (8 decimals)
+    uint256 constant MORPHO_USDC_BORROW = 1000e6;   // 1000 USDC
 
     // ── Helpers ──────────────────────────────────────────────
 
@@ -479,5 +527,206 @@ contract HealthFactorForkTest is Test {
         (,,,,,uint256 hfAfter) = IPool(AAVE_V3_CORE).getUserAccountData(user);
         assertEq(hfAfter, type(uint256).max, "health factor is max with no debt");
         console.log("No-debt test passed: HF = type(uint256).max");
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════════
+    //  Morpho Blue Health Factor Tests
+    // ═══════════════════════════════════════════════════════════════════════════════
+
+    function _morphoMarketParams() internal pure returns (IMorpho.MarketParams memory) {
+        return IMorpho.MarketParams({
+            loanToken: USDC,
+            collateralToken: CBBTC,
+            oracle: MORPHO_CBBTC_ORACLE,
+            irm: MORPHO_CBBTC_IRM,
+            lltv: MORPHO_CBBTC_LLTV
+        });
+    }
+
+    function _setupMorphoPosition(uint256 collateral, uint256 borrowAmount) internal {
+        deal(CBBTC, user, collateral);
+        vm.startPrank(user);
+        IERC20(CBBTC).approve(MORPHO_BLUE, collateral);
+        IMorpho(MORPHO_BLUE).supplyCollateral(_morphoMarketParams(), collateral, user, "");
+        if (borrowAmount > 0) {
+            IMorpho(MORPHO_BLUE).borrow(_morphoMarketParams(), borrowAmount, 0, user, user);
+        }
+        vm.stopPrank();
+    }
+
+    /// @dev Compute Morpho Blue health factor from on-chain state. Returns 18-decimal value.
+    ///      Returns type(uint256).max when borrowShares == 0 (no debt).
+    function _computeMorphoHF(bytes32 marketId, address account) internal view returns (uint256) {
+        (, uint128 borrowShares, uint128 collateral) = IMorpho(MORPHO_BLUE).position(marketId, account);
+        if (borrowShares == 0) return type(uint256).max;
+
+        (,, uint128 totalBorrowAssets, uint128 totalBorrowShares,,) = IMorpho(MORPHO_BLUE).market(marketId);
+
+        uint256 denom = uint256(totalBorrowShares) + 1e6;
+        uint256 borrowed = (uint256(borrowShares) * (uint256(totalBorrowAssets) + 1) + denom - 1) / denom;
+
+        uint256 collateralPrice = IMorphoOracle(MORPHO_CBBTC_ORACLE).price();
+        uint256 collValue = uint256(collateral) * collateralPrice / 1e36;
+        uint256 maxBorrow = collValue * MORPHO_CBBTC_LLTV / 1e18;
+
+        return maxBorrow * 1e18 / borrowed;
+    }
+
+    /// @dev Build a minimal settlement (Aave withdraw+deposit round-trip) with a Morpho HF condition.
+    function _buildMorphoConditionSettlement(uint112 minHF) internal view returns (SettlementParams memory p) {
+        bytes memory withdrawData = abi.encodePacked(aWETH, AAVE_V3_CORE);
+        bytes memory depositData = abi.encodePacked(AAVE_V3_CORE);
+
+        bytes32 l0 = _leaf(3, 0, withdrawData);
+        bytes32 l1 = _leaf(0, 0, depositData);
+        bytes32 root = _pair(l0, l1);
+        p.merkleRoot = root;
+
+        bytes32[] memory pr0 = new bytes32[](1);
+        pr0[0] = l1;
+        bytes32[] memory pr1 = new bytes32[](1);
+        pr1[0] = l0;
+
+        // settlementData: 0 conversions + 1 Morpho condition (68 bytes)
+        p.settlementPayload = abi.encodePacked(
+            uint8(0),                  // numConversions = 0
+            uint8(1),                  // numConditions = 1
+            uint16(4000),              // lenderId = 4000 (Morpho)
+            MORPHO_BLUE,               // morpho address (20 bytes)
+            MORPHO_CBBTC_USDC_MARKET,  // marketId (32 bytes)
+            minHF                      // minHealthFactor (uint112, 14 bytes)
+        );
+
+        p.orderData = abi.encodePacked(root, uint16(p.settlementPayload.length), p.settlementPayload);
+
+        p.executionData = abi.encodePacked(
+            uint8(1),
+            uint8(1),
+            address(0),
+            _action(WETH, type(uint112).max, address(settlement), 3, 0, withdrawData, pr0),
+            _action(WETH, 0, user, 0, 0, depositData, pr1)
+        );
+
+        p.fillerCalldata = "";
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    //  Test 5: Morpho HF passes — reasonable minHF with healthy position
+    // ═══════════════════════════════════════════════════════════
+
+    function test_morphoHealthFactor_passes() public {
+        if (address(settlement) == address(0)) return;
+
+        _setupMorphoPosition(MORPHO_CBBTC_COLLATERAL, MORPHO_USDC_BORROW);
+
+        SettlementParams memory p = _buildMorphoConditionSettlement(uint112(1.1e18));
+        uint48 deadline = uint48(block.timestamp + 1 hours);
+        bytes memory sig = _signOrder(userPk, p.merkleRoot, deadline, p.settlementPayload);
+        settlement.settle(0, deadline, sig, p.orderData, p.executionData, p.fillerCalldata);
+
+        _assertMorphoPositionHealthy(1.1e18);
+    }
+
+    function _assertMorphoPositionHealthy(uint256 minHF) internal view {
+        (, uint128 borrowShares, uint128 collateral) = IMorpho(MORPHO_BLUE).position(MORPHO_CBBTC_USDC_MARKET, user);
+        assertGt(uint256(borrowShares), 0, "user has Morpho borrow shares");
+        assertEq(uint256(collateral), MORPHO_CBBTC_COLLATERAL, "Morpho collateral unchanged");
+
+        uint256 morphoHF = _computeMorphoHF(MORPHO_CBBTC_USDC_MARKET, user);
+        assertGt(morphoHF, minHF, "Morpho HF above signed minimum");
+        console.log("Morpho HF:", morphoHF);
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    //  Test 6: Morpho HF reverts — unreasonably high minHF
+    // ═══════════════════════════════════════════════════════════
+
+    function test_morphoHealthFactor_reverts() public {
+        if (address(settlement) == address(0)) return;
+
+        _setupMorphoPosition(MORPHO_CBBTC_COLLATERAL, MORPHO_USDC_BORROW);
+
+        SettlementParams memory p = _buildMorphoConditionSettlement(uint112(50e18));
+
+        uint48 deadline = uint48(block.timestamp + 1 hours);
+        bytes memory sig = _signOrder(userPk, p.merkleRoot, deadline, p.settlementPayload);
+
+        vm.expectRevert(HealthFactorChecker.HealthFactorTooLow.selector);
+        settlement.settle(0, deadline, sig, p.orderData, p.executionData, p.fillerCalldata);
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    //  Test 7: Morpho no debt — borrowShares == 0 → always passes
+    // ═══════════════════════════════════════════════════════════
+
+    function test_morphoHealthFactor_noDebt() public {
+        if (address(settlement) == address(0)) return;
+
+        _setupMorphoPosition(MORPHO_CBBTC_COLLATERAL, 0);
+
+        SettlementParams memory p = _buildMorphoConditionSettlement(uint112(100e18));
+
+        uint48 deadline = uint48(block.timestamp + 1 hours);
+        bytes memory sig = _signOrder(userPk, p.merkleRoot, deadline, p.settlementPayload);
+
+        settlement.settle(0, deadline, sig, p.orderData, p.executionData, p.fillerCalldata);
+
+        console.log("Morpho no-debt test passed: borrowShares == 0 skips HF check");
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    //  Test 8: Mixed conditions — both Aave and Morpho HF checks
+    //  in the same settlementData (variable-size parsing)
+    // ═══════════════════════════════════════════════════════════
+
+    function test_mixedConditions_aaveAndMorpho() public {
+        if (address(settlement) == address(0)) return;
+
+        // Set up Morpho position (Aave position from setUp — no Aave debt, HF = max)
+        _setupMorphoPosition(MORPHO_CBBTC_COLLATERAL, MORPHO_USDC_BORROW);
+
+        bytes memory withdrawData = abi.encodePacked(aWETH, AAVE_V3_CORE);
+        bytes memory depositData = abi.encodePacked(AAVE_V3_CORE);
+
+        bytes32 l0 = _leaf(3, 0, withdrawData);
+        bytes32 l1 = _leaf(0, 0, depositData);
+        bytes32 root = _pair(l0, l1);
+
+        bytes32[] memory pr0 = new bytes32[](1);
+        pr0[0] = l1;
+        bytes32[] memory pr1 = new bytes32[](1);
+        pr1[0] = l0;
+
+        // settlementData: 0 conversions + 2 conditions (Aave 36 bytes + Morpho 68 bytes)
+        bytes memory settlementPayload = abi.encodePacked(
+            uint8(0),                    // numConversions = 0
+            uint8(2),                    // numConditions = 2
+            // Condition 0: Aave (36 bytes)
+            uint16(0),                   // lenderId = 0 (Aave V3)
+            AAVE_V3_CORE,               // pool (20 bytes)
+            uint112(1.1e18),             // minHF (14 bytes)
+            // Condition 1: Morpho (68 bytes)
+            uint16(4000),                // lenderId = 4000 (Morpho)
+            MORPHO_BLUE,                 // morpho address (20 bytes)
+            MORPHO_CBBTC_USDC_MARKET,    // marketId (32 bytes)
+            uint112(1.1e18)              // minHF (14 bytes)
+        );
+
+        bytes memory orderData = abi.encodePacked(root, uint16(settlementPayload.length), settlementPayload);
+
+        bytes memory executionData = abi.encodePacked(
+            uint8(1),
+            uint8(1),
+            address(0),
+            _action(WETH, type(uint112).max, address(settlement), 3, 0, withdrawData, pr0),
+            _action(WETH, 0, user, 0, 0, depositData, pr1)
+        );
+
+        uint48 deadline = uint48(block.timestamp + 1 hours);
+        bytes memory sig = _signOrder(userPk, root, deadline, settlementPayload);
+
+        settlement.settle(0, deadline, sig, orderData, executionData, "");
+
+        console.log("Mixed conditions test passed: both Aave + Morpho HF checks succeeded");
     }
 }

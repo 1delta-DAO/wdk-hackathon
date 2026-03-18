@@ -30,8 +30,9 @@ import {SettlementForwarder} from "./SettlementForwarder.sol";
  *    [per conversion (68 bytes)]:
  *        [20: assetIn][20: assetOut][20: oracle][8: swapTolerance]
  *    [optional 1: numConditions]
- *    [optional per condition (36 bytes)]:
- *        [2: lenderId][20: pool][14: minHealthFactor]
+ *    [optional per condition — variable size based on lenderId]:
+ *        Aave   (lenderId 0-1999):   [2: lenderId][20: pool][14: minHF]                = 36 bytes
+ *        Morpho (lenderId 4000-4999): [2: lenderId][20: morpho][32: marketId][14: minHF] = 68 bytes
  *
  *  fillerCalldata format (solver-provided):
  *    [per conversion]:
@@ -330,8 +331,9 @@ contract Settlement is
      * @notice Verifies post-settlement conditions encoded in the tail of settlementData.
      * @dev Format after conversion data:
      *        [1: numConditions]
-     *        [per condition (36 bytes)]:
-     *            [2: lenderId][20: pool][14: minHealthFactor]
+     *        [per condition — variable size based on lenderId]:
+     *            Aave (lenderId < 2000):   [2: lenderId][20: pool][14: minHF]         = 36 bytes
+     *            Morpho (4000 ≤ id < 5000):[2: lenderId][20: morpho][32: marketId][14: minHF] = 68 bytes
      *
      *      If settlementData ends at the conversion section, no conditions are checked.
      *      Routes by lenderId using LenderIds thresholds (same as lending operations).
@@ -358,21 +360,36 @@ contract Settlement is
 
         for (uint256 i; i < numConditions;) {
             uint256 lenderId;
-            address pool;
-            uint256 minHF;
-
             assembly {
-                let ptr := add(add(settlementData, 0x20), cursor)
-                lenderId := and(0xffff, shr(240, mload(ptr)))
-                pool := shr(96, mload(add(ptr, 2)))
-                minHF := shr(144, mload(add(ptr, 22)))
+                lenderId := and(0xffff, shr(240, mload(add(add(settlementData, 0x20), cursor))))
             }
 
             if (lenderId < LenderIds.UP_TO_AAVE_V2) {
+                // 36-byte Aave condition: [2: lenderId][20: pool][14: minHF]
+                address pool;
+                uint256 minHF;
+                assembly {
+                    let ptr := add(add(settlementData, 0x20), cursor)
+                    pool := shr(96, mload(add(ptr, 2)))
+                    minHF := shr(144, mload(add(ptr, 22)))
+                }
                 _checkAaveHealthFactor(pool, callerAddress, minHF);
+                cursor += 36;
+            } else if (lenderId < LenderIds.UP_TO_MORPHO) {
+                // 68-byte Morpho condition: [2: lenderId][20: morpho][32: marketId][14: minHF]
+                address morpho;
+                bytes32 marketId;
+                uint256 minHF;
+                assembly {
+                    let ptr := add(add(settlementData, 0x20), cursor)
+                    morpho := shr(96, mload(add(ptr, 2)))
+                    marketId := mload(add(ptr, 22))
+                    minHF := shr(144, mload(add(ptr, 54)))
+                }
+                _checkMorphoHealthFactor(morpho, marketId, callerAddress, minHF);
+                cursor += 68;
             }
 
-            cursor += 36;
             unchecked { ++i; }
         }
     }
