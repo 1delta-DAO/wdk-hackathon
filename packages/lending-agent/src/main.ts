@@ -21,19 +21,25 @@ export async function runAgent (clients: AgentClients): Promise<string> {
   console.log(`\n1delta tools (${oneDeltaTools.length}): ${oneDeltaTools.map(t => t.name).join(', ')}`)
   console.log(`WDK tools    (${wdkTools.length}): ${wdkTools.map(t => t.name).join(', ')}`)
 
+  const ONEDELTA_TOOLS_NEEDED = new Set(['get_lending_markets', 'convert_amount', 'get_deposit_calldata'])
+  const WDK_TOOLS_NEEDED = new Set(['getAddress', 'sendTransaction'])
+
+  const filteredOneDelta = oneDeltaTools.filter(t => ONEDELTA_TOOLS_NEEDED.has(t.name))
+  const filteredWdk = wdkTools.filter(t => WDK_TOOLS_NEEDED.has(t.name))
+
   const toolClientMap = Object.fromEntries([
-    ...oneDeltaTools.map(t => [t.name, oneDeltaClient] as const),
-    ...wdkTools.map(t => [t.name, wdkClient] as const)
+    ...filteredOneDelta.map(t => [t.name, oneDeltaClient] as const),
+    ...filteredWdk.map(t => [t.name, wdkClient] as const)
   ])
 
   const allTools: Anthropic.Tool[] = [
-    ...toAnthropicTools(oneDeltaTools),
-    ...toAnthropicTools(wdkTools)
+    ...toAnthropicTools(filteredOneDelta),
+    ...toAnthropicTools(filteredWdk)
   ]
 
   let walletAddress = ''
   try {
-    walletAddress = await callTool(wdkClient, 'getAddress', { blockchain: 'ethereum' })
+    walletAddress = await callTool(wdkClient, 'getAddress', { chain: 'ethereum' })
     console.log(`\nWallet address (ethereum): ${walletAddress}`)
   } catch (err) {
     console.warn('Could not fetch wallet address from WDK:', err instanceof Error ? err.message : err)
