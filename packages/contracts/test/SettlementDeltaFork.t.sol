@@ -191,14 +191,12 @@ contract SettlementDeltaForkTest is Test {
         aWETH_dst     = dstWeth.aTokenAddress;
         vDebtUSDC_dst = dstUsdc.variableDebtTokenAddress;
 
-        // Settlement contract approvals
-        vm.startPrank(address(settlement));
-        IERC20(USDC).approve(AAVE_V3_PRIME, type(uint256).max);
-        IERC20(USDC).approve(AAVE_V3_CORE, type(uint256).max);
-        IERC20(WETH).approve(AAVE_V3_CORE, type(uint256).max);
-        IERC20(WETH).approve(AAVE_V3_PRIME, type(uint256).max);
-        IERC20(USDC).approve(MORPHO_BLUE, type(uint256).max);
-        vm.stopPrank();
+        // Settlement contract approvals (via approveToken — no prank needed)
+        settlement.approveToken(USDC, AAVE_V3_PRIME, type(uint256).max);
+        settlement.approveToken(USDC, AAVE_V3_CORE, type(uint256).max);
+        settlement.approveToken(WETH, AAVE_V3_CORE, type(uint256).max);
+        settlement.approveToken(WETH, AAVE_V3_PRIME, type(uint256).max);
+        settlement.approveToken(USDC, MORPHO_BLUE, type(uint256).max);
     }
 
     function _setupUserOnPrime() internal {

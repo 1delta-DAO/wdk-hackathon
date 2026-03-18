@@ -91,6 +91,51 @@ abstract contract SettlementExecutor is UniversalSettlementLending {
         uint256 totalBorrowed;
     }
 
+    // ── Token Approvals ────────────────────────────────────
+
+    /**
+     * @notice Approve a spender to transfer tokens held by this contract.
+     * @dev Permissionless — safe because the settlement contract never holds
+     *      persistent balances.  Solvers can batch approvals with settlements
+     *      via multicall.
+     */
+    function approveToken(address token, address spender, uint256 amount) external {
+        assembly {
+            let ptr := mload(0x40)
+            mstore(ptr, 0x095ea7b300000000000000000000000000000000000000000000000000000000)
+            mstore(add(ptr, 0x04), spender)
+            mstore(add(ptr, 0x24), amount)
+
+            let success := call(gas(), token, 0, ptr, 0x44, 0x00, 0x20)
+            let rdsize := returndatasize()
+            success := and(
+                success,
+                or(iszero(rdsize), and(gt(rdsize, 31), eq(mload(0x00), 1)))
+            )
+            if iszero(success) {
+                returndatacopy(0, 0, rdsize)
+                revert(0, rdsize)
+            }
+        }
+    }
+
+    /**
+     * @notice Batch multiple calls into a single transaction.
+     * @dev Enables solvers to bundle approvals with settlements:
+     *      multicall([approveToken(USDC, pool, max), settleWithFlashLoan(...)])
+     */
+    function multicall(bytes[] calldata data) external {
+        for (uint256 i; i < data.length;) {
+            (bool success, bytes memory result) = address(this).delegatecall(data[i]);
+            if (!success) {
+                assembly {
+                    revert(add(result, 0x20), mload(result))
+                }
+            }
+            unchecked { ++i; }
+        }
+    }
+
     // ── Settlement entry point ──────────────────────────────
 
     /**
