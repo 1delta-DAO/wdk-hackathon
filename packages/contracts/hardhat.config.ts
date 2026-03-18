@@ -4,8 +4,9 @@ import "@nomicfoundation/hardhat-foundry";
 
 const config: HardhatUserConfig = {
   solidity: {
-    version: "0.8.28",
+    version: "0.8.34",
     settings: {
+      viaIR: true,
       optimizer: {
         enabled: true,
         runs: 200,
