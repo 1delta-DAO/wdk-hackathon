@@ -1,6 +1,20 @@
-import { encodePacked, concatHex, type Hex } from 'viem'
+import {
+  encodePacked,
+  concatHex,
+  padHex,
+  numberToHex,
+  type Hex,
+} from 'viem'
 import type { Address } from './constants.js'
 import { AmountSentinel } from './constants.js'
+
+const UINT112_MAX = (1n << 112n) - 1n
+
+/** Encode uint112 for condition blobs (14 bytes, fixed layout). */
+function encodeUint112(value: bigint): Hex {
+  if (value < 0n || value > UINT112_MAX) throw new Error('minHealthFactor must be uint112')
+  return padHex(numberToHex(value), { size: 14 })
+}
 
 // ═══════════════════════════════════════════════════════════
 //  Settlement Data (user-signed)
@@ -26,10 +40,95 @@ export interface MorphoCondition {
   minHealthFactor: bigint
 }
 
-export type Condition = AaveCondition | MorphoCondition
+export interface CompoundV3Condition {
+  lenderId: number
+  comet: Address
+  assetBitmap: number
+  minHealthFactor: bigint
+}
+
+export interface SimplePoolCondition {
+  lenderId: number
+  poolOrComptrollerOrSilo: Address
+  minHealthFactor: bigint
+}
+
+export type Condition =
+  | AaveCondition
+  | MorphoCondition
+  | CompoundV3Condition
+  | SimplePoolCondition
 
 function isMorphoCondition(c: Condition): c is MorphoCondition {
   return 'marketId' in c
+}
+
+function isCompoundV3Condition(c: Condition): c is CompoundV3Condition {
+  return 'comet' in c && 'assetBitmap' in c
+}
+
+function isSimplePoolCondition(c: Condition): c is SimplePoolCondition {
+  return 'poolOrComptrollerOrSilo' in c
+}
+
+/** Aave / AaveV2 condition: 36 bytes. Exported for batches. */
+export function encodeAaveHealthCondition(params: {
+  lenderId: number
+  pool: Address
+  minHealthFactor: bigint
+}): Hex {
+  return concatHex([
+    numberToHex(params.lenderId, { size: 2 }),
+    padHex(params.pool, { size: 20 }),
+    encodeUint112(params.minHealthFactor),
+  ])
+}
+
+/** Morpho condition: 68 bytes. Exported for batches. */
+export function encodeMorphoHealthCondition(params: {
+  lenderId: number
+  morpho: Address
+  marketId: Hex
+  minHealthFactor: bigint
+}): Hex {
+  if ((params.marketId.length - 2) / 2 !== 32) throw new Error('marketId must be bytes32')
+  return concatHex([
+    numberToHex(params.lenderId, { size: 2 }),
+    padHex(params.morpho, { size: 20 }),
+    padHex(params.marketId, { size: 32 }),
+    encodeUint112(params.minHealthFactor),
+  ])
+}
+
+/** Compound V3 condition: 38 bytes. Exported for batches (future C3 members). */
+export function encodeCompoundV3HealthCondition(params: {
+  lenderId: number
+  comet: Address
+  assetBitmap: number
+  minHealthFactor: bigint
+}): Hex {
+  if (params.assetBitmap < 0 || params.assetBitmap > 65535) {
+    throw new Error('assetBitmap must be uint16 (0-65535)')
+  }
+  return concatHex([
+    numberToHex(params.lenderId, { size: 2 }),
+    padHex(params.comet, { size: 20 }),
+    numberToHex(params.assetBitmap, { size: 2 }),
+    encodeUint112(params.minHealthFactor),
+  ])
+}
+
+/** Compound V2 / Silo condition: 36 bytes. Exported for batches (future simple-pool members). */
+export function encodeSimplePoolHealthCondition(params: {
+  lenderId: number
+  poolOrComptrollerOrSilo: Address
+  minHealthFactor: bigint
+}): Hex {
+  return encodeAaveHealthCondition({
+    lenderId: params.lenderId,
+    pool: params.poolOrComptrollerOrSilo,
+    minHealthFactor: params.minHealthFactor,
+  })
 }
 
 /**
@@ -62,19 +161,19 @@ export function encodeSettlementData(
     parts.push(encodePacked(['uint8'], [conditions.length]))
     for (const cond of conditions) {
       if (isMorphoCondition(cond)) {
+        parts.push(encodeMorphoHealthCondition(cond))
+      } else if (isCompoundV3Condition(cond)) {
+        parts.push(encodeCompoundV3HealthCondition(cond))
+      } else if (isSimplePoolCondition(cond)) {
         parts.push(
-          encodePacked(
-            ['uint16', 'address', 'bytes32', 'uint112'],
-            [cond.lenderId, cond.morpho, cond.marketId, cond.minHealthFactor],
-          ),
+          encodeSimplePoolHealthCondition({
+            lenderId: cond.lenderId,
+            poolOrComptrollerOrSilo: cond.poolOrComptrollerOrSilo,
+            minHealthFactor: cond.minHealthFactor,
+          }),
         )
       } else {
-        parts.push(
-          encodePacked(
-            ['uint16', 'address', 'uint112'],
-            [cond.lenderId, cond.pool, cond.minHealthFactor],
-          ),
-        )
+        parts.push(encodeAaveHealthCondition(cond))
       }
     }
   }

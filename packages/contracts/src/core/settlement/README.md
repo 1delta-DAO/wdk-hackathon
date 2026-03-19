@@ -16,7 +16,13 @@ Settlement.sol (external API, EIP-712 signature verification)
   │   ├── _executeActions()            — loops actions, verifies merkle proofs
   │   ├── _sweepAndVerify()            — borrow-only fee sweep + deficit check
   │   ├── _executeIntent()             — virtual hook for swaps
-  │   └── _postSettlementCheck()       — virtual hook for health factor etc.
+  │   ├── _postSettlementCheck()       — virtual hook for health factor etc.
+  │   ├── approveToken()               — permissionless ERC20 approve
+  │   ├── multicall()                  — batch multiple calls in one tx
+  │   ├── permit()                     — forward ERC-2612 permit
+  │   ├── morphoSetAuthorizationWithSig() — forward Morpho auth signature
+  │   ├── compoundV3AllowBySig()       — forward Compound V3 auth signature
+  │   └── aaveDelegationWithSig()      — forward Aave credit delegation sig
   |
   ├── EIP712OrderVerifier.sol          — signature recovery + deadline check
   |
@@ -496,6 +502,273 @@ owner (`callerAddress`) for all lending operations.  This ensures:
 | Silo V2 | repay | `[20: silo]` | 20 |
 | Morpho | borrow/withdraw | `[20: loan][20: coll][20: oracle][20: irm][16: lltv][1: flags][20: morpho]` | 117 |
 | Morpho | deposit/repay | above + `[2: cbLen][cbLen: cbData]` | 119+ |
+
+---
+
+## Signature-Based Authorizations
+
+The settlement contract exposes forwarding functions that let solvers bundle
+user-signed authorizations with the settlement itself in a single `multicall`
+transaction.  No separate user approval transactions are needed.
+
+### Available Functions
+
+| Function | Protocol | Selector | Purpose |
+|----------|----------|----------|---------|
+| `permit` | ERC-2612 | `0xd505accf` | ERC20 token approval (aTokens, wstETH, etc.) |
+| `morphoSetAuthorizationWithSig` | Morpho Blue | `0x8069218f` | Authorize settlement to borrow/withdraw on user's behalf |
+| `compoundV3AllowBySig` | Compound V3 | `0xbb24d994` | Authorize settlement as Comet manager |
+| `aaveDelegationWithSig` | Aave V3 | `0x0b52d558` | Credit delegation for borrow-on-behalf |
+| `approveToken` | ERC20 | `0x095ea7b3` | Settlement contract's own token approvals (permissionless) |
+
+All signature functions use **best-effort** semantics — they silently succeed if
+the call reverts (e.g. nonce already consumed), making multicall bundles
+idempotent and safe to retry.
+
+### Multicall Pattern
+
+```
+multicall([
+  permit(aWstETH, user, settlement, max, deadline, v, r, s),
+  morphoSetAuthorizationWithSig(morpho, user, settlement, true, nonce, deadline, v, r, s),
+  settleWithFlashLoan(WETH, debt, morpho, 0, 0, deadline, sig, orderData, execData, "")
+])
+```
+
+### Signing with viem
+
+#### 1. ERC-2612 Permit (aTokens, wstETH, etc.)
+
+```typescript
+import { signTypedData } from 'viem/accounts'
+
+// Read the token's nonce and DOMAIN_SEPARATOR on-chain
+const nonce = await publicClient.readContract({
+  address: tokenAddress,
+  abi: [{ name: 'nonces', type: 'function', inputs: [{ type: 'address' }], outputs: [{ type: 'uint256' }] }],
+  functionName: 'nonces',
+  args: [userAddress],
+})
+
+const signature = await walletClient.signTypedData({
+  account: userAddress,
+  domain: {
+    name: await publicClient.readContract({ address: tokenAddress, abi: erc20Abi, functionName: 'name' }),
+    version: '1',
+    chainId: await publicClient.getChainId(),
+    verifyingContract: tokenAddress,
+  },
+  types: {
+    Permit: [
+      { name: 'owner', type: 'address' },
+      { name: 'spender', type: 'address' },
+      { name: 'value', type: 'uint256' },
+      { name: 'nonce', type: 'uint256' },
+      { name: 'deadline', type: 'uint256' },
+    ],
+  },
+  primaryType: 'Permit',
+  message: {
+    owner: userAddress,
+    spender: settlementAddress,
+    value: maxUint256,
+    nonce,
+    deadline,
+  },
+})
+
+// Split signature for the contract call
+const { v, r, s } = parseSignature(signature)
+```
+
+#### 2. Morpho Blue Authorization
+
+```typescript
+// Read nonce from Morpho Blue
+const morphoNonce = await publicClient.readContract({
+  address: morphoBlueAddress,
+  abi: [{ name: 'nonce', type: 'function', inputs: [{ type: 'address' }], outputs: [{ type: 'uint256' }] }],
+  functionName: 'nonce',
+  args: [userAddress],
+})
+
+const signature = await walletClient.signTypedData({
+  account: userAddress,
+  domain: {
+    chainId: await publicClient.getChainId(),
+    verifyingContract: morphoBlueAddress,
+  },
+  types: {
+    Authorization: [
+      { name: 'authorizer', type: 'address' },
+      { name: 'authorized', type: 'address' },
+      { name: 'isAuthorized', type: 'bool' },
+      { name: 'nonce', type: 'uint256' },
+      { name: 'deadline', type: 'uint256' },
+    ],
+  },
+  primaryType: 'Authorization',
+  message: {
+    authorizer: userAddress,
+    authorized: settlementAddress,
+    isAuthorized: true,
+    nonce: morphoNonce,
+    deadline,
+  },
+})
+
+const { v, r, s } = parseSignature(signature)
+// Use: settlement.morphoSetAuthorizationWithSig(morpho, user, settlement, true, nonce, deadline, v, r, s)
+```
+
+#### 3. Compound V3 AllowBySig
+
+```typescript
+// Read nonce from Comet
+const cometNonce = await publicClient.readContract({
+  address: cometAddress,
+  abi: [{ name: 'userNonce', type: 'function', inputs: [{ type: 'address' }], outputs: [{ type: 'uint256' }] }],
+  functionName: 'userNonce',
+  args: [userAddress],
+})
+
+const signature = await walletClient.signTypedData({
+  account: userAddress,
+  domain: {
+    name: await publicClient.readContract({ address: cometAddress, abi: cometAbi, functionName: 'name' }),
+    version: await publicClient.readContract({ address: cometAddress, abi: cometAbi, functionName: 'version' }),
+    chainId: await publicClient.getChainId(),
+    verifyingContract: cometAddress,
+  },
+  types: {
+    Authorization: [
+      { name: 'owner', type: 'address' },
+      { name: 'manager', type: 'address' },
+      { name: 'isAllowed', type: 'bool' },
+      { name: 'nonce', type: 'uint256' },
+      { name: 'expiry', type: 'uint256' },
+    ],
+  },
+  primaryType: 'Authorization',
+  message: {
+    owner: userAddress,
+    manager: settlementAddress,
+    isAllowed: true,
+    nonce: cometNonce,
+    expiry: deadline,
+  },
+})
+
+const { v, r, s } = parseSignature(signature)
+// Use: settlement.compoundV3AllowBySig(comet, user, settlement, true, nonce, deadline, v, r, s)
+```
+
+#### 4. Aave V3 Credit Delegation
+
+```typescript
+// Read nonce from the debt token (variableDebtToken)
+const delegationNonce = await publicClient.readContract({
+  address: debtTokenAddress,
+  abi: [{ name: '_nonces', type: 'function', inputs: [{ type: 'address' }], outputs: [{ type: 'uint256' }] }],
+  functionName: '_nonces',
+  args: [userAddress],
+})
+
+const signature = await walletClient.signTypedData({
+  account: userAddress,
+  domain: {
+    name: await publicClient.readContract({ address: debtTokenAddress, abi: erc20Abi, functionName: 'name' }),
+    version: '1',
+    chainId: await publicClient.getChainId(),
+    verifyingContract: debtTokenAddress,
+  },
+  types: {
+    DelegationWithSig: [
+      { name: 'delegatee', type: 'address' },
+      { name: 'value', type: 'uint256' },
+      { name: 'nonce', type: 'uint256' },
+      { name: 'deadline', type: 'uint256' },
+    ],
+  },
+  primaryType: 'DelegationWithSig',
+  message: {
+    delegatee: settlementAddress,
+    value: maxUint256,
+    nonce: delegationNonce,
+    deadline,
+  },
+})
+
+const { v, r, s } = parseSignature(signature)
+// Use: settlement.aaveDelegationWithSig(debtToken, user, settlement, maxUint256, deadline, v, r, s)
+```
+
+#### 5. Settlement Order (EIP-712)
+
+```typescript
+const signature = await walletClient.signTypedData({
+  account: userAddress,
+  domain: {
+    name: 'MigrationSettlement',   // or 'Settlement' depending on contract
+    version: '1',
+    chainId: await publicClient.getChainId(),
+    verifyingContract: settlementAddress,
+  },
+  types: {
+    MigrationOrder: [
+      { name: 'merkleRoot', type: 'bytes32' },
+      { name: 'deadline', type: 'uint48' },
+      { name: 'settlementData', type: 'bytes' },
+    ],
+  },
+  primaryType: 'MigrationOrder',
+  message: {
+    merkleRoot,
+    deadline,
+    settlementData,
+  },
+})
+// Pass the raw 65-byte signature (r ++ s ++ v) to the settlement contract
+```
+
+### Complete Multicall Example (viem)
+
+```typescript
+import { encodeFunctionData, parseSignature, maxUint256 } from 'viem'
+import { settlementAbi } from './abi'
+
+// 1. User signs all authorizations off-chain
+const permitSig = await signPermit(...)
+const morphoAuthSig = await signMorphoAuth(...)
+const orderSig = await signOrder(...)
+
+// 2. Solver builds multicall bundle
+const calls = [
+  encodeFunctionData({
+    abi: settlementAbi,
+    functionName: 'permit',
+    args: [aToken, user, settlement, maxUint256, deadline, permitSig.v, permitSig.r, permitSig.s],
+  }),
+  encodeFunctionData({
+    abi: settlementAbi,
+    functionName: 'morphoSetAuthorizationWithSig',
+    args: [morpho, user, settlement, true, nonce, deadline, morphoAuthSig.v, morphoAuthSig.r, morphoAuthSig.s],
+  }),
+  encodeFunctionData({
+    abi: settlementAbi,
+    functionName: 'settleWithFlashLoan',
+    args: [flashAsset, flashAmount, morpho, 0, 0, deadline, orderSig, orderData, executionData, '0x'],
+  }),
+]
+
+// 3. Solver submits single transaction
+await walletClient.writeContract({
+  address: settlement,
+  abi: settlementAbi,
+  functionName: 'multicall',
+  args: [calls],
+})
+```
 
 ---
 

@@ -338,4 +338,198 @@ contract AaveToMorphoMigrationTest is Test {
 
         console.log("Aave -> Morpho migration completed successfully!");
     }
+
+    // ── Test: Multicall with signature-based authorizations ──
+
+    /**
+     * @notice Same migration but using multicall to bundle:
+     *   1. ERC20 permit (aWstETH → settlement)
+     *   2. Morpho setAuthorizationWithSig (authorize settlement)
+     *   3. settleWithFlashLoan (the actual migration)
+     *
+     * This is the production flow — no separate user transactions needed.
+     */
+    function test_forkMigration_aaveToMorpho_viaMulticall() public {
+        if (address(settlement) == address(0)) return;
+
+        // ── Setup user position (same as above) ──
+        vm.deal(user, USER_COLLATERAL + USER_BORROW + 2 ether);
+        vm.startPrank(user);
+        uint256 stethAmount = IStETH(STETH).submit{value: USER_COLLATERAL + 1 ether}(address(0));
+        IERC20(STETH).approve(WSTETH, stethAmount);
+        uint256 wstethAmount = IWstETH(WSTETH).wrap(stethAmount);
+        IERC20(WSTETH).approve(AAVE_V3_CORE, wstethAmount);
+        IPool(AAVE_V3_CORE).supply(WSTETH, wstethAmount, user, 0);
+        IPool(AAVE_V3_CORE).borrow(WETH, USER_BORROW, 2, 0, user);
+        vm.stopPrank();
+
+        uint256 aaveCollBefore = IERC20(aWstETH).balanceOf(user);
+        uint256 aaveDebtBefore = IERC20(vDebtWETH).balanceOf(user);
+
+        // ── Build Morpho authorization signature ──
+        // Morpho Blue uses EIP-712 for setAuthorizationWithSig
+        bytes32 morphoAuthTypehash = keccak256(
+            "Authorization(address authorizer,address authorized,bool isAuthorized,uint256 nonce,uint256 deadline)"
+        );
+
+        // Read Morpho's DOMAIN_SEPARATOR (it's a public immutable on Morpho Blue)
+        (bool ok, bytes memory dsData) = MORPHO_BLUE.staticcall(
+            abi.encodeWithSignature("DOMAIN_SEPARATOR()")
+        );
+        require(ok, "DOMAIN_SEPARATOR call failed");
+        bytes32 morphoDomainSeparator = abi.decode(dsData, (bytes32));
+
+        uint48 deadline = uint48(block.timestamp + 1 hours);
+
+        // Read user's nonce on Morpho
+        (bool ok2, bytes memory nonceData) = MORPHO_BLUE.staticcall(
+            abi.encodeWithSignature("nonce(address)", user)
+        );
+        require(ok2, "nonce call failed");
+        uint256 morphoNonce = abi.decode(nonceData, (uint256));
+
+        bytes32 morphoAuthDigest = keccak256(abi.encodePacked(
+            "\x19\x01",
+            morphoDomainSeparator,
+            keccak256(abi.encode(
+                morphoAuthTypehash,
+                user,                     // authorizer
+                address(settlement),      // authorized
+                true,                     // isAuthorized
+                morphoNonce,
+                uint256(deadline)
+            ))
+        ));
+        (uint8 mv, bytes32 mr, bytes32 ms) = vm.sign(userPk, morphoAuthDigest);
+
+        // ── Build aWstETH permit signature ──
+        // aWstETH is an Aave aToken which supports ERC-2612 permit
+        bytes32 permitTypehash = keccak256(
+            "Permit(address owner,address spender,uint256 value,uint256 nonce,uint256 deadline)"
+        );
+        // Read aToken DOMAIN_SEPARATOR and nonce
+        (bool ok3, bytes memory aDsData) = aWstETH.staticcall(
+            abi.encodeWithSignature("DOMAIN_SEPARATOR()")
+        );
+        // If the aToken doesn't support DOMAIN_SEPARATOR (some don't), fall back to direct approve
+        bool usePermit = ok3 && aDsData.length == 32;
+
+        uint8 pv; bytes32 pr; bytes32 ps;
+        if (usePermit) {
+            bytes32 aTokenDomainSep = abi.decode(aDsData, (bytes32));
+            (bool ok4, bytes memory aNonceData) = aWstETH.staticcall(
+                abi.encodeWithSignature("nonces(address)", user)
+            );
+            // Some aTokens use _nonces mapping
+            if (!ok4 || aNonceData.length != 32) {
+                (ok4, aNonceData) = aWstETH.staticcall(
+                    abi.encodeWithSignature("nonce(address)", user)
+                );
+            }
+            if (ok4 && aNonceData.length == 32) {
+                uint256 permitNonce = abi.decode(aNonceData, (uint256));
+                bytes32 permitDigest = keccak256(abi.encodePacked(
+                    "\x19\x01",
+                    aTokenDomainSep,
+                    keccak256(abi.encode(
+                        permitTypehash,
+                        user,
+                        address(settlement),
+                        type(uint256).max,
+                        permitNonce,
+                        uint256(deadline)
+                    ))
+                ));
+                (pv, pr, ps) = vm.sign(userPk, permitDigest);
+            } else {
+                usePermit = false;
+            }
+        }
+
+        // If permit not available, fall back to direct approve
+        if (!usePermit) {
+            vm.prank(user);
+            IERC20(aWstETH).approve(address(settlement), type(uint256).max);
+        }
+
+        // ── Build settlement calldata (same merkle tree as basic test) ──
+        bytes memory repayData = abi.encodePacked(uint8(2), vDebtWETH, AAVE_V3_CORE);
+        bytes memory withdrawData = abi.encodePacked(aWstETH, AAVE_V3_CORE);
+        bytes memory morphoDepositData = abi.encodePacked(
+            WETH, WSTETH, MORPHO_ORACLE, MORPHO_IRM, uint128(MORPHO_LLTV), uint8(0), MORPHO_BLUE, uint16(0)
+        );
+        bytes memory morphoBorrowData = abi.encodePacked(
+            WETH, WSTETH, MORPHO_ORACLE, MORPHO_IRM, uint128(MORPHO_LLTV), uint8(0), MORPHO_BLUE
+        );
+
+        bytes32 l0 = _leaf(2, 0, repayData);
+        bytes32 l1 = _leaf(3, 0, withdrawData);
+        bytes32 l2 = _leaf(0, 4000, morphoDepositData);
+        bytes32 l3 = _leaf(1, 4000, morphoBorrowData);
+
+        bytes32 h01 = _pair(l0, l1);
+        bytes32 h23 = _pair(l2, l3);
+        bytes32 root = _pair(h01, h23);
+
+        bytes32[] memory pr0 = new bytes32[](2);
+        pr0[0] = l1; pr0[1] = h23;
+        bytes32[] memory pr1 = new bytes32[](2);
+        pr1[0] = l0; pr1[1] = h23;
+        bytes32[] memory pr2 = new bytes32[](2);
+        pr2[0] = l3; pr2[1] = h01;
+        bytes32[] memory pr3 = new bytes32[](2);
+        pr3[0] = l2; pr3[1] = h01;
+
+        bytes memory orderData = abi.encodePacked(root, uint16(0));
+        bytes memory sig = _signOrder(userPk, root, deadline, hex"");
+
+        bytes memory executionData = abi.encodePacked(
+            uint8(2), uint8(2), address(0),
+            _action(WETH, type(uint112).max, user, 2, 0, repayData, pr0),
+            _action(WSTETH, type(uint112).max, address(settlement), 3, 0, withdrawData, pr1),
+            _action(WSTETH, 0, user, 0, 4000, morphoDepositData, pr2),
+            _action(WETH, uint112(aaveDebtBefore), address(settlement), 1, 4000, morphoBorrowData, pr3)
+        );
+
+        // ── Build multicall bundle ──
+        bytes[] memory calls = new bytes[](usePermit ? 3 : 2);
+        uint256 idx;
+
+        // 1. Permit for aWstETH (if supported)
+        if (usePermit) {
+            calls[idx++] = abi.encodeCall(
+                settlement.permit,
+                (aWstETH, user, address(settlement), type(uint256).max, deadline, pv, pr, ps)
+            );
+        }
+
+        // 2. Morpho authorization via signature
+        calls[idx++] = abi.encodeCall(
+            settlement.morphoSetAuthorizationWithSig,
+            (MORPHO_BLUE, user, address(settlement), true, morphoNonce, deadline, mv, mr, ms)
+        );
+
+        // 3. Execute the migration
+        calls[idx++] = abi.encodeCall(
+            settlement.settleWithFlashLoan,
+            (WETH, aaveDebtBefore, MORPHO_BLUE, 0, 0, deadline, sig, orderData, executionData, hex"")
+        );
+
+        // ── Execute multicall (solver submits single tx) ──
+        settlement.multicall(calls);
+
+        // ── Verify same results as basic test ──
+        assertEq(IERC20(vDebtWETH).balanceOf(user), 0, "Aave debt repaid");
+        assertEq(IERC20(aWstETH).balanceOf(user), 0, "Aave collateral withdrawn");
+
+        (, uint128 morphoBorrowShares, uint128 morphoCollateral) =
+            IMorpho(MORPHO_BLUE).position(MORPHO_MARKET_ID, user);
+        assertGt(morphoCollateral, 0, "Morpho collateral set");
+        assertGt(morphoBorrowShares, 0, "Morpho debt set");
+
+        assertApproxEqRel(morphoCollateral, aaveCollBefore, 0.001e18, "collateral preserved");
+        assertEq(IERC20(WETH).balanceOf(address(settlement)), 0, "settlement clean");
+
+        console.log("Multicall migration (permit + morphoAuth + settle) completed!");
+    }
 }

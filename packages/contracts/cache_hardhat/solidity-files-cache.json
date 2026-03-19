@@ -1,13 +1,14 @@
 {
   "_format": "hh-sol-cache-2",
   "files": {
-    "/home/axtar-1/wdk-hackathon/filler/contracts/src/Counter.sol": {
-      "lastModificationDate": 1773350729258,
-      "contentHash": "2f760bf74007673e3bf9e3aeef9b11a1",
-      "sourceName": "src/Counter.sol",
+    "/home/axtar-1/wdk-hackathon/packages/contracts/src/core/errors/Errors.sol": {
+      "lastModificationDate": 1773532820078,
+      "contentHash": "230277d1656af429de70d10f0041c11f",
+      "sourceName": "src/core/errors/Errors.sol",
       "solcConfig": {
-        "version": "0.8.28",
+        "version": "0.8.34",
         "settings": {
+          "viaIR": true,
           "optimizer": {
             "enabled": true,
             "runs": 200
@@ -31,10 +32,1084 @@
       },
       "imports": [],
       "versionPragmas": [
-        "^0.8.28"
+        "0.8.34"
       ],
       "artifacts": [
-        "Counter"
+        "DeltaErrors"
+      ]
+    },
+    "/home/axtar-1/wdk-hackathon/packages/contracts/src/core/settlement/lending/UniversalSettlementLending.sol": {
+      "lastModificationDate": 1773755981635,
+      "contentHash": "fb35bb4ac2bf3212fbc797373509fe8d",
+      "sourceName": "src/core/settlement/lending/UniversalSettlementLending.sol",
+      "solcConfig": {
+        "version": "0.8.34",
+        "settings": {
+          "viaIR": true,
+          "optimizer": {
+            "enabled": true,
+            "runs": 200
+          },
+          "evmVersion": "paris",
+          "outputSelection": {
+            "*": {
+              "*": [
+                "abi",
+                "evm.bytecode",
+                "evm.deployedBytecode",
+                "evm.methodIdentifiers",
+                "metadata"
+              ],
+              "": [
+                "ast"
+              ]
+            }
+          }
+        }
+      },
+      "imports": [
+        "./AaveSettlementLending.sol",
+        "./CompoundV3SettlementLending.sol",
+        "./CompoundV2SettlementLending.sol",
+        "./MorphoSettlementLending.sol",
+        "./SiloV2SettlementLending.sol",
+        "./DeltaEnums.sol",
+        "../../errors/Errors.sol"
+      ],
+      "versionPragmas": [
+        "0.8.34"
+      ],
+      "artifacts": [
+        "UniversalSettlementLending"
+      ]
+    },
+    "/home/axtar-1/wdk-hackathon/packages/contracts/src/core/settlement/lending/AaveSettlementLending.sol": {
+      "lastModificationDate": 1773849959217,
+      "contentHash": "4cce56648d0ad4a1678e995876816457",
+      "sourceName": "src/core/settlement/lending/AaveSettlementLending.sol",
+      "solcConfig": {
+        "version": "0.8.34",
+        "settings": {
+          "viaIR": true,
+          "optimizer": {
+            "enabled": true,
+            "runs": 200
+          },
+          "evmVersion": "paris",
+          "outputSelection": {
+            "*": {
+              "*": [
+                "abi",
+                "evm.bytecode",
+                "evm.deployedBytecode",
+                "evm.methodIdentifiers",
+                "metadata"
+              ],
+              "": [
+                "ast"
+              ]
+            }
+          }
+        }
+      },
+      "imports": [
+        "../../selectors/ERC20Selectors.sol",
+        "../../masks/Masks.sol"
+      ],
+      "versionPragmas": [
+        "0.8.34"
+      ],
+      "artifacts": [
+        "AaveSettlementLending"
+      ]
+    },
+    "/home/axtar-1/wdk-hackathon/packages/contracts/src/core/settlement/lending/CompoundV3SettlementLending.sol": {
+      "lastModificationDate": 1773849970777,
+      "contentHash": "42434e0b194922ca5e61aa6ac07b1685",
+      "sourceName": "src/core/settlement/lending/CompoundV3SettlementLending.sol",
+      "solcConfig": {
+        "version": "0.8.34",
+        "settings": {
+          "viaIR": true,
+          "optimizer": {
+            "enabled": true,
+            "runs": 200
+          },
+          "evmVersion": "paris",
+          "outputSelection": {
+            "*": {
+              "*": [
+                "abi",
+                "evm.bytecode",
+                "evm.deployedBytecode",
+                "evm.methodIdentifiers",
+                "metadata"
+              ],
+              "": [
+                "ast"
+              ]
+            }
+          }
+        }
+      },
+      "imports": [
+        "../../selectors/ERC20Selectors.sol",
+        "../../masks/Masks.sol"
+      ],
+      "versionPragmas": [
+        "0.8.34"
+      ],
+      "artifacts": [
+        "CompoundV3SettlementLending"
+      ]
+    },
+    "/home/axtar-1/wdk-hackathon/packages/contracts/src/core/settlement/lending/CompoundV2SettlementLending.sol": {
+      "lastModificationDate": 1773850027450,
+      "contentHash": "3612f9462d289706b68ec16e240f1789",
+      "sourceName": "src/core/settlement/lending/CompoundV2SettlementLending.sol",
+      "solcConfig": {
+        "version": "0.8.34",
+        "settings": {
+          "viaIR": true,
+          "optimizer": {
+            "enabled": true,
+            "runs": 200
+          },
+          "evmVersion": "paris",
+          "outputSelection": {
+            "*": {
+              "*": [
+                "abi",
+                "evm.bytecode",
+                "evm.deployedBytecode",
+                "evm.methodIdentifiers",
+                "metadata"
+              ],
+              "": [
+                "ast"
+              ]
+            }
+          }
+        }
+      },
+      "imports": [
+        "../../selectors/ERC20Selectors.sol",
+        "../../masks/Masks.sol"
+      ],
+      "versionPragmas": [
+        "0.8.34"
+      ],
+      "artifacts": [
+        "CompoundV2SettlementLending"
+      ]
+    },
+    "/home/axtar-1/wdk-hackathon/packages/contracts/src/core/settlement/lending/MorphoSettlementLending.sol": {
+      "lastModificationDate": 1773850080340,
+      "contentHash": "79d7bda71997b338f7dddd24fce2cf76",
+      "sourceName": "src/core/settlement/lending/MorphoSettlementLending.sol",
+      "solcConfig": {
+        "version": "0.8.34",
+        "settings": {
+          "viaIR": true,
+          "optimizer": {
+            "enabled": true,
+            "runs": 200
+          },
+          "evmVersion": "paris",
+          "outputSelection": {
+            "*": {
+              "*": [
+                "abi",
+                "evm.bytecode",
+                "evm.deployedBytecode",
+                "evm.methodIdentifiers",
+                "metadata"
+              ],
+              "": [
+                "ast"
+              ]
+            }
+          }
+        }
+      },
+      "imports": [
+        "../../selectors/ERC20Selectors.sol",
+        "../../masks/Masks.sol"
+      ],
+      "versionPragmas": [
+        "0.8.34"
+      ],
+      "artifacts": [
+        "MorphoSettlementLending"
+      ]
+    },
+    "/home/axtar-1/wdk-hackathon/packages/contracts/src/core/settlement/lending/SiloV2SettlementLending.sol": {
+      "lastModificationDate": 1773850093384,
+      "contentHash": "7dac858eb5c44f9fbda6870e2e746527",
+      "sourceName": "src/core/settlement/lending/SiloV2SettlementLending.sol",
+      "solcConfig": {
+        "version": "0.8.34",
+        "settings": {
+          "viaIR": true,
+          "optimizer": {
+            "enabled": true,
+            "runs": 200
+          },
+          "evmVersion": "paris",
+          "outputSelection": {
+            "*": {
+              "*": [
+                "abi",
+                "evm.bytecode",
+                "evm.deployedBytecode",
+                "evm.methodIdentifiers",
+                "metadata"
+              ],
+              "": [
+                "ast"
+              ]
+            }
+          }
+        }
+      },
+      "imports": [
+        "../../selectors/ERC20Selectors.sol",
+        "../../masks/Masks.sol"
+      ],
+      "versionPragmas": [
+        "0.8.34"
+      ],
+      "artifacts": [
+        "SiloV2SettlementLending"
+      ]
+    },
+    "/home/axtar-1/wdk-hackathon/packages/contracts/src/core/settlement/lending/DeltaEnums.sol": {
+      "lastModificationDate": 1773747223829,
+      "contentHash": "856f70217de6eb6e6ead9fa71f20cbd7",
+      "sourceName": "src/core/settlement/lending/DeltaEnums.sol",
+      "solcConfig": {
+        "version": "0.8.34",
+        "settings": {
+          "viaIR": true,
+          "optimizer": {
+            "enabled": true,
+            "runs": 200
+          },
+          "evmVersion": "paris",
+          "outputSelection": {
+            "*": {
+              "*": [
+                "abi",
+                "evm.bytecode",
+                "evm.deployedBytecode",
+                "evm.methodIdentifiers",
+                "metadata"
+              ],
+              "": [
+                "ast"
+              ]
+            }
+          }
+        }
+      },
+      "imports": [],
+      "versionPragmas": [
+        "0.8.34"
+      ],
+      "artifacts": [
+        "BridgeIds",
+        "ComposerCommands",
+        "CompoundV2Selector",
+        "ERC4626Ids",
+        "FlashLoanIds",
+        "Gen2025ActionIds",
+        "LenderIds",
+        "LenderOps",
+        "PermitIds",
+        "SiloV2CollateralType",
+        "TransferIds"
+      ]
+    },
+    "/home/axtar-1/wdk-hackathon/packages/contracts/src/core/selectors/ERC20Selectors.sol": {
+      "lastModificationDate": 1773430340164,
+      "contentHash": "1583da9accac6de2ccca566f31482271",
+      "sourceName": "src/core/selectors/ERC20Selectors.sol",
+      "solcConfig": {
+        "version": "0.8.34",
+        "settings": {
+          "viaIR": true,
+          "optimizer": {
+            "enabled": true,
+            "runs": 200
+          },
+          "evmVersion": "paris",
+          "outputSelection": {
+            "*": {
+              "*": [
+                "abi",
+                "evm.bytecode",
+                "evm.deployedBytecode",
+                "evm.methodIdentifiers",
+                "metadata"
+              ],
+              "": [
+                "ast"
+              ]
+            }
+          }
+        }
+      },
+      "imports": [],
+      "versionPragmas": [
+        "0.8.34"
+      ],
+      "artifacts": [
+        "ERC20Selectors"
+      ]
+    },
+    "/home/axtar-1/wdk-hackathon/packages/contracts/src/core/masks/Masks.sol": {
+      "lastModificationDate": 1773430340164,
+      "contentHash": "f0e5c2b651a91b18e041c4309b3ba200",
+      "sourceName": "src/core/masks/Masks.sol",
+      "solcConfig": {
+        "version": "0.8.34",
+        "settings": {
+          "viaIR": true,
+          "optimizer": {
+            "enabled": true,
+            "runs": 200
+          },
+          "evmVersion": "paris",
+          "outputSelection": {
+            "*": {
+              "*": [
+                "abi",
+                "evm.bytecode",
+                "evm.deployedBytecode",
+                "evm.methodIdentifiers",
+                "metadata"
+              ],
+              "": [
+                "ast"
+              ]
+            }
+          }
+        }
+      },
+      "imports": [],
+      "versionPragmas": [
+        "0.8.34"
+      ],
+      "artifacts": [
+        "Masks"
+      ]
+    },
+    "/home/axtar-1/wdk-hackathon/packages/contracts/src/core/settlement/Settlement.sol": {
+      "lastModificationDate": 1773856306407,
+      "contentHash": "91e034677c298e39c731e0398df35858",
+      "sourceName": "src/core/settlement/Settlement.sol",
+      "solcConfig": {
+        "version": "0.8.34",
+        "settings": {
+          "viaIR": true,
+          "optimizer": {
+            "enabled": true,
+            "runs": 200
+          },
+          "evmVersion": "paris",
+          "outputSelection": {
+            "*": {
+              "*": [
+                "abi",
+                "evm.bytecode",
+                "evm.deployedBytecode",
+                "evm.methodIdentifiers",
+                "metadata"
+              ],
+              "": [
+                "ast"
+              ]
+            }
+          }
+        }
+      },
+      "imports": [
+        "./flash-loan/MorphoSettlementCallback.sol",
+        "./flash-loan/MoolahSettlementCallback.sol",
+        "./flash-loan/Morpho.sol",
+        "./EIP712OrderVerifier.sol",
+        "./oracle/SwapVerifier.sol",
+        "./conditions/HealthFactorChecker.sol",
+        "./lending/DeltaEnums.sol",
+        "./SettlementForwarder.sol"
+      ],
+      "versionPragmas": [
+        "0.8.34"
+      ],
+      "artifacts": [
+        "Settlement"
+      ]
+    },
+    "/home/axtar-1/wdk-hackathon/packages/contracts/src/core/settlement/flash-loan/Morpho.sol": {
+      "lastModificationDate": 1773447513495,
+      "contentHash": "67f19eb02f4cee8d255d476f11cbf2f1",
+      "sourceName": "src/core/settlement/flash-loan/Morpho.sol",
+      "solcConfig": {
+        "version": "0.8.34",
+        "settings": {
+          "viaIR": true,
+          "optimizer": {
+            "enabled": true,
+            "runs": 200
+          },
+          "evmVersion": "paris",
+          "outputSelection": {
+            "*": {
+              "*": [
+                "abi",
+                "evm.bytecode",
+                "evm.deployedBytecode",
+                "evm.methodIdentifiers",
+                "metadata"
+              ],
+              "": [
+                "ast"
+              ]
+            }
+          }
+        }
+      },
+      "imports": [
+        "../../masks/Masks.sol"
+      ],
+      "versionPragmas": [
+        "0.8.34"
+      ],
+      "artifacts": [
+        "MorphoFlashLoans"
+      ]
+    },
+    "/home/axtar-1/wdk-hackathon/packages/contracts/src/core/settlement/EIP712OrderVerifier.sol": {
+      "lastModificationDate": 1773749621749,
+      "contentHash": "9558661462cf8f38991a00b9371a3425",
+      "sourceName": "src/core/settlement/EIP712OrderVerifier.sol",
+      "solcConfig": {
+        "version": "0.8.34",
+        "settings": {
+          "viaIR": true,
+          "optimizer": {
+            "enabled": true,
+            "runs": 200
+          },
+          "evmVersion": "paris",
+          "outputSelection": {
+            "*": {
+              "*": [
+                "abi",
+                "evm.bytecode",
+                "evm.deployedBytecode",
+                "evm.methodIdentifiers",
+                "metadata"
+              ],
+              "": [
+                "ast"
+              ]
+            }
+          }
+        }
+      },
+      "imports": [],
+      "versionPragmas": [
+        "0.8.34"
+      ],
+      "artifacts": [
+        "EIP712OrderVerifier"
+      ]
+    },
+    "/home/axtar-1/wdk-hackathon/packages/contracts/src/core/settlement/flash-loan/MoolahSettlementCallback.sol": {
+      "lastModificationDate": 1773766928174,
+      "contentHash": "f87411781e930f86b13ea39f2d08d88a",
+      "sourceName": "src/core/settlement/flash-loan/MoolahSettlementCallback.sol",
+      "solcConfig": {
+        "version": "0.8.34",
+        "settings": {
+          "viaIR": true,
+          "optimizer": {
+            "enabled": true,
+            "runs": 200
+          },
+          "evmVersion": "paris",
+          "outputSelection": {
+            "*": {
+              "*": [
+                "abi",
+                "evm.bytecode",
+                "evm.deployedBytecode",
+                "evm.methodIdentifiers",
+                "metadata"
+              ],
+              "": [
+                "ast"
+              ]
+            }
+          }
+        }
+      },
+      "imports": [
+        "../SettlementExecutor.sol"
+      ],
+      "versionPragmas": [
+        "0.8.34"
+      ],
+      "artifacts": [
+        "MoolahSettlementCallback"
+      ]
+    },
+    "/home/axtar-1/wdk-hackathon/packages/contracts/src/core/settlement/oracle/SwapVerifier.sol": {
+      "lastModificationDate": 1773781487390,
+      "contentHash": "4c60a6ba5e0a1b3750b495e59d928c1c",
+      "sourceName": "src/core/settlement/oracle/SwapVerifier.sol",
+      "solcConfig": {
+        "version": "0.8.34",
+        "settings": {
+          "viaIR": true,
+          "optimizer": {
+            "enabled": true,
+            "runs": 200
+          },
+          "evmVersion": "paris",
+          "outputSelection": {
+            "*": {
+              "*": [
+                "abi",
+                "evm.bytecode",
+                "evm.deployedBytecode",
+                "evm.methodIdentifiers",
+                "metadata"
+              ],
+              "": [
+                "ast"
+              ]
+            }
+          }
+        }
+      },
+      "imports": [
+        "./ISettlementPriceOracle.sol"
+      ],
+      "versionPragmas": [
+        "0.8.34"
+      ],
+      "artifacts": [
+        "SwapVerifier"
+      ]
+    },
+    "/home/axtar-1/wdk-hackathon/packages/contracts/src/core/settlement/SettlementForwarder.sol": {
+      "lastModificationDate": 1773709135969,
+      "contentHash": "be683cbe85ed870e3f6950733934c45f",
+      "sourceName": "src/core/settlement/SettlementForwarder.sol",
+      "solcConfig": {
+        "version": "0.8.34",
+        "settings": {
+          "viaIR": true,
+          "optimizer": {
+            "enabled": true,
+            "runs": 200
+          },
+          "evmVersion": "paris",
+          "outputSelection": {
+            "*": {
+              "*": [
+                "abi",
+                "evm.bytecode",
+                "evm.deployedBytecode",
+                "evm.methodIdentifiers",
+                "metadata"
+              ],
+              "": [
+                "ast"
+              ]
+            }
+          }
+        }
+      },
+      "imports": [],
+      "versionPragmas": [
+        "0.8.34"
+      ],
+      "artifacts": [
+        "SettlementForwarder"
+      ]
+    },
+    "/home/axtar-1/wdk-hackathon/packages/contracts/src/core/settlement/conditions/HealthFactorChecker.sol": {
+      "lastModificationDate": 1773853155199,
+      "contentHash": "2c37c1b91ecf34e33df3d361be5f390c",
+      "sourceName": "src/core/settlement/conditions/HealthFactorChecker.sol",
+      "solcConfig": {
+        "version": "0.8.34",
+        "settings": {
+          "viaIR": true,
+          "optimizer": {
+            "enabled": true,
+            "runs": 200
+          },
+          "evmVersion": "paris",
+          "outputSelection": {
+            "*": {
+              "*": [
+                "abi",
+                "evm.bytecode",
+                "evm.deployedBytecode",
+                "evm.methodIdentifiers",
+                "metadata"
+              ],
+              "": [
+                "ast"
+              ]
+            }
+          }
+        }
+      },
+      "imports": [],
+      "versionPragmas": [
+        "0.8.34"
+      ],
+      "artifacts": [
+        "HealthFactorChecker"
+      ]
+    },
+    "/home/axtar-1/wdk-hackathon/packages/contracts/src/core/settlement/flash-loan/MorphoSettlementCallback.sol": {
+      "lastModificationDate": 1773766913488,
+      "contentHash": "1957452e4a462d95dac59bd73d72869d",
+      "sourceName": "src/core/settlement/flash-loan/MorphoSettlementCallback.sol",
+      "solcConfig": {
+        "version": "0.8.34",
+        "settings": {
+          "viaIR": true,
+          "optimizer": {
+            "enabled": true,
+            "runs": 200
+          },
+          "evmVersion": "paris",
+          "outputSelection": {
+            "*": {
+              "*": [
+                "abi",
+                "evm.bytecode",
+                "evm.deployedBytecode",
+                "evm.methodIdentifiers",
+                "metadata"
+              ],
+              "": [
+                "ast"
+              ]
+            }
+          }
+        }
+      },
+      "imports": [
+        "../SettlementExecutor.sol"
+      ],
+      "versionPragmas": [
+        "0.8.34"
+      ],
+      "artifacts": [
+        "MorphoSettlementCallback"
+      ]
+    },
+    "/home/axtar-1/wdk-hackathon/packages/contracts/src/core/settlement/SettlementExecutor.sol": {
+      "lastModificationDate": 1773866694471,
+      "contentHash": "5fa1381d1ed82f8df75f4f0bff17b541",
+      "sourceName": "src/core/settlement/SettlementExecutor.sol",
+      "solcConfig": {
+        "version": "0.8.34",
+        "settings": {
+          "viaIR": true,
+          "optimizer": {
+            "enabled": true,
+            "runs": 200
+          },
+          "evmVersion": "paris",
+          "outputSelection": {
+            "*": {
+              "*": [
+                "abi",
+                "evm.bytecode",
+                "evm.deployedBytecode",
+                "evm.methodIdentifiers",
+                "metadata"
+              ],
+              "": [
+                "ast"
+              ]
+            }
+          }
+        }
+      },
+      "imports": [
+        "./lending/UniversalSettlementLending.sol"
+      ],
+      "versionPragmas": [
+        "0.8.34"
+      ],
+      "artifacts": [
+        "SettlementExecutor"
+      ]
+    },
+    "/home/axtar-1/wdk-hackathon/packages/contracts/src/core/settlement/oracle/ISettlementPriceOracle.sol": {
+      "lastModificationDate": 1773777959123,
+      "contentHash": "003ca9d8a1adeff5df0a65b3c25d130b",
+      "sourceName": "src/core/settlement/oracle/ISettlementPriceOracle.sol",
+      "solcConfig": {
+        "version": "0.8.34",
+        "settings": {
+          "viaIR": true,
+          "optimizer": {
+            "enabled": true,
+            "runs": 200
+          },
+          "evmVersion": "paris",
+          "outputSelection": {
+            "*": {
+              "*": [
+                "abi",
+                "evm.bytecode",
+                "evm.deployedBytecode",
+                "evm.methodIdentifiers",
+                "metadata"
+              ],
+              "": [
+                "ast"
+              ]
+            }
+          }
+        }
+      },
+      "imports": [],
+      "versionPragmas": [
+        "0.8.34"
+      ],
+      "artifacts": [
+        "ISettlementPriceOracle"
+      ]
+    },
+    "/home/axtar-1/wdk-hackathon/packages/contracts/src/core/settlement/MigrationSettlement.sol": {
+      "lastModificationDate": 1773779226461,
+      "contentHash": "edd5f67ad2994747079c9e95a2dc7eab",
+      "sourceName": "src/core/settlement/MigrationSettlement.sol",
+      "solcConfig": {
+        "version": "0.8.34",
+        "settings": {
+          "viaIR": true,
+          "optimizer": {
+            "enabled": true,
+            "runs": 200
+          },
+          "evmVersion": "paris",
+          "outputSelection": {
+            "*": {
+              "*": [
+                "abi",
+                "evm.bytecode",
+                "evm.deployedBytecode",
+                "evm.methodIdentifiers",
+                "metadata"
+              ],
+              "": [
+                "ast"
+              ]
+            }
+          }
+        }
+      },
+      "imports": [
+        "./flash-loan/MorphoSettlementCallback.sol",
+        "./flash-loan/Morpho.sol",
+        "./apr/AaveV3AprChecker.sol",
+        "./EIP712OrderVerifier.sol"
+      ],
+      "versionPragmas": [
+        "0.8.34"
+      ],
+      "artifacts": [
+        "MigrationSettlement"
+      ]
+    },
+    "/home/axtar-1/wdk-hackathon/packages/contracts/src/core/settlement/apr/AaveV3AprChecker.sol": {
+      "lastModificationDate": 1773745143361,
+      "contentHash": "577db6e574380ab0b5df6aade5d69dbc",
+      "sourceName": "src/core/settlement/apr/AaveV3AprChecker.sol",
+      "solcConfig": {
+        "version": "0.8.34",
+        "settings": {
+          "viaIR": true,
+          "optimizer": {
+            "enabled": true,
+            "runs": 200
+          },
+          "evmVersion": "paris",
+          "outputSelection": {
+            "*": {
+              "*": [
+                "abi",
+                "evm.bytecode",
+                "evm.deployedBytecode",
+                "evm.methodIdentifiers",
+                "metadata"
+              ],
+              "": [
+                "ast"
+              ]
+            }
+          }
+        }
+      },
+      "imports": [
+        "./IAaveV3Pool.sol"
+      ],
+      "versionPragmas": [
+        "0.8.34"
+      ],
+      "artifacts": [
+        "AaveV3AprChecker"
+      ]
+    },
+    "/home/axtar-1/wdk-hackathon/packages/contracts/src/core/settlement/apr/IAaveV3Pool.sol": {
+      "lastModificationDate": 1773745143361,
+      "contentHash": "dfc017b6060c87c07d399cad37fa8443",
+      "sourceName": "src/core/settlement/apr/IAaveV3Pool.sol",
+      "solcConfig": {
+        "version": "0.8.34",
+        "settings": {
+          "viaIR": true,
+          "optimizer": {
+            "enabled": true,
+            "runs": 200
+          },
+          "evmVersion": "paris",
+          "outputSelection": {
+            "*": {
+              "*": [
+                "abi",
+                "evm.bytecode",
+                "evm.deployedBytecode",
+                "evm.methodIdentifiers",
+                "metadata"
+              ],
+              "": [
+                "ast"
+              ]
+            }
+          }
+        }
+      },
+      "imports": [],
+      "versionPragmas": [
+        "0.8.34"
+      ],
+      "artifacts": [
+        "IAaveV3Pool"
+      ]
+    },
+    "/home/axtar-1/wdk-hackathon/packages/contracts/src/core/settlement/lending/DepositBalanceFetcher.sol": {
+      "lastModificationDate": 1773747302075,
+      "contentHash": "7fb273bc71414ffa425ee8946b3e05a3",
+      "sourceName": "src/core/settlement/lending/DepositBalanceFetcher.sol",
+      "solcConfig": {
+        "version": "0.8.34",
+        "settings": {
+          "viaIR": true,
+          "optimizer": {
+            "enabled": true,
+            "runs": 200
+          },
+          "evmVersion": "paris",
+          "outputSelection": {
+            "*": {
+              "*": [
+                "abi",
+                "evm.bytecode",
+                "evm.deployedBytecode",
+                "evm.methodIdentifiers",
+                "metadata"
+              ],
+              "": [
+                "ast"
+              ]
+            }
+          }
+        }
+      },
+      "imports": [
+        "../../selectors/ERC20Selectors.sol",
+        "../../masks/Masks.sol"
+      ],
+      "versionPragmas": [
+        "0.8.34"
+      ],
+      "artifacts": [
+        "DepositBalanceFetcher"
+      ]
+    },
+    "/home/axtar-1/wdk-hackathon/packages/contracts/src/core/settlement/lending/BorrowBalanceFetcher.sol": {
+      "lastModificationDate": 1773747303089,
+      "contentHash": "dacc8593c2897029bd79c67299c1a0f3",
+      "sourceName": "src/core/settlement/lending/BorrowBalanceFetcher.sol",
+      "solcConfig": {
+        "version": "0.8.34",
+        "settings": {
+          "viaIR": true,
+          "optimizer": {
+            "enabled": true,
+            "runs": 200
+          },
+          "evmVersion": "paris",
+          "outputSelection": {
+            "*": {
+              "*": [
+                "abi",
+                "evm.bytecode",
+                "evm.deployedBytecode",
+                "evm.methodIdentifiers",
+                "metadata"
+              ],
+              "": [
+                "ast"
+              ]
+            }
+          }
+        }
+      },
+      "imports": [
+        "../../selectors/ERC20Selectors.sol",
+        "../../masks/Masks.sol"
+      ],
+      "versionPragmas": [
+        "0.8.34"
+      ],
+      "artifacts": [
+        "BorrowBalanceFetcher"
+      ]
+    },
+    "/home/axtar-1/wdk-hackathon/packages/contracts/src/core/settlement/flash-loan/MorphoCallback.sol": {
+      "lastModificationDate": 1773658302399,
+      "contentHash": "55cfddbc43058c53a617140064eb018f",
+      "sourceName": "src/core/settlement/flash-loan/MorphoCallback.sol",
+      "solcConfig": {
+        "version": "0.8.34",
+        "settings": {
+          "viaIR": true,
+          "optimizer": {
+            "enabled": true,
+            "runs": 200
+          },
+          "evmVersion": "paris",
+          "outputSelection": {
+            "*": {
+              "*": [
+                "abi",
+                "evm.bytecode",
+                "evm.deployedBytecode",
+                "evm.methodIdentifiers",
+                "metadata"
+              ],
+              "": [
+                "ast"
+              ]
+            }
+          }
+        }
+      },
+      "imports": [
+        "../../masks/Masks.sol",
+        "../../errors/Errors.sol"
+      ],
+      "versionPragmas": [
+        "0.8.34"
+      ],
+      "artifacts": [
+        "MorphoFlashLoanCallback"
+      ]
+    },
+    "/home/axtar-1/wdk-hackathon/packages/contracts/src/core/settlement/flash-loan/MoolahCallback.sol": {
+      "lastModificationDate": 1773658311882,
+      "contentHash": "7e6fbbbd52d7c5e7141421a6407051e3",
+      "sourceName": "src/core/settlement/flash-loan/MoolahCallback.sol",
+      "solcConfig": {
+        "version": "0.8.34",
+        "settings": {
+          "viaIR": true,
+          "optimizer": {
+            "enabled": true,
+            "runs": 200
+          },
+          "evmVersion": "paris",
+          "outputSelection": {
+            "*": {
+              "*": [
+                "abi",
+                "evm.bytecode",
+                "evm.deployedBytecode",
+                "evm.methodIdentifiers",
+                "metadata"
+              ],
+              "": [
+                "ast"
+              ]
+            }
+          }
+        }
+      },
+      "imports": [
+        "../../masks/Masks.sol",
+        "../../errors/Errors.sol"
+      ],
+      "versionPragmas": [
+        "0.8.34"
+      ],
+      "artifacts": [
+        "MoolahFlashLoanCallback"
+      ]
+    },
+    "/home/axtar-1/wdk-hackathon/packages/contracts/src/core/settlement/oracle/AaveOracleAdapter.sol": {
+      "lastModificationDate": 1773782758543,
+      "contentHash": "f8ac0870215859eb8b3439a8c2418e97",
+      "sourceName": "src/core/settlement/oracle/AaveOracleAdapter.sol",
+      "solcConfig": {
+        "version": "0.8.34",
+        "settings": {
+          "viaIR": true,
+          "optimizer": {
+            "enabled": true,
+            "runs": 200
+          },
+          "evmVersion": "paris",
+          "outputSelection": {
+            "*": {
+              "*": [
+                "abi",
+                "evm.bytecode",
+                "evm.deployedBytecode",
+                "evm.methodIdentifiers",
+                "metadata"
+              ],
+              "": [
+                "ast"
+              ]
+            }
+          }
+        }
+      },
+      "imports": [
+        "./ISettlementPriceOracle.sol"
+      ],
+      "versionPragmas": [
+        "0.8.34"
+      ],
+      "artifacts": [
+        "AaveOracleAdapter",
+        "IAaveOracle",
+        "IERC20Decimals"
       ]
     }
   }
