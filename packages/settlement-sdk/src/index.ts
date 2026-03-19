@@ -23,25 +23,8 @@ export type {
   SwapParams,
 } from './calldata.js'
 
-// High-level flow builders
-export {
-  buildMigration,
-  buildSimpleMigration,
-  buildCollateralSwap,
-  buildDebtSwap,
-  buildClosePosition,
-  buildCrossProtocolMigration,
-} from './flows.js'
-export type {
-  AavePool,
-  SettlementResult,
-  MigrationParams,
-  SimpleMigrationParams,
-  CollateralSwapParams,
-  DebtSwapParams,
-  ClosePositionParams,
-  CrossProtocolMigrationParams,
-} from './flows.js'
+// High-level settlement builders (namespace)
+export { Settlement } from './settlement.js'
 
 // Permits, signatures & multicall encoding
 export {

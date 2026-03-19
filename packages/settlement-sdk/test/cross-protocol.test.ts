@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildCrossProtocolMigration } from '../src/flows.js'
+import { Settlement } from '../src/settlement.js'
 import { MorphoData, AaveData, pairHash, buildLeaf } from '../src/merkle.js'
 import { LenderOps, AmountSentinel } from '../src/constants.js'
 import type { MorphoMarketParams } from '../src/merkle.js'
@@ -51,8 +51,8 @@ describe('MorphoData', () => {
 
 // ── Aave → Morpho migration test ──────────────────────────
 
-describe('buildCrossProtocolMigration: Aave wstETH/WETH → Morpho', () => {
-  const result = buildCrossProtocolMigration({
+describe('Settlement.buildCrossProtocolMigration: Aave wstETH/WETH → Morpho', () => {
+  const result = Settlement.buildCrossProtocolMigration({
     collateralAsset: WSTETH,
     debtAsset: WETH,
     source: {
@@ -118,8 +118,8 @@ describe('buildCrossProtocolMigration: Aave wstETH/WETH → Morpho', () => {
   })
 })
 
-describe('buildCrossProtocolMigration: with Morpho health factor condition', () => {
-  const result = buildCrossProtocolMigration({
+describe('Settlement.buildCrossProtocolMigration: with Morpho health factor condition', () => {
+  const result = Settlement.buildCrossProtocolMigration({
     collateralAsset: WSTETH,
     debtAsset: WETH,
     source: {

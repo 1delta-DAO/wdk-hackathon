@@ -7,10 +7,25 @@ pragma solidity 0.8.34;
  * @notice EIP-712 signature verification for migration orders.
  *         The user signs (merkleRoot, deadline, settlementData) so agents
  *         can only execute pre-approved orders within the validity window.
+ *
+ *         Supports two cancellation mechanisms:
+ *         1. Per-order cancellation via order digest hash.
+ *         2. Nonce-based bulk cancellation — all orders with nonce < minNonce are invalid.
  */
 abstract contract EIP712OrderVerifier {
     error OrderExpired();
     error InvalidOrderSignature();
+    error OrderCancelled();
+    error NonceTooLow();
+
+    event OrderCancelledEvent(address indexed user, bytes32 indexed orderHash);
+    event NonceIncremented(address indexed user, uint256 newMinNonce);
+
+    /// @notice Per-order cancellation: orderHash => cancelled.
+    mapping(bytes32 => bool) public cancelledOrders;
+
+    /// @notice Nonce-based bulk cancellation: all orders with nonce < minNonce are invalid.
+    mapping(address => uint256) public minNonce;
 
     bytes32 private immutable _DOMAIN_SEPARATOR;
 
@@ -36,8 +51,48 @@ abstract contract EIP712OrderVerifier {
         return _DOMAIN_SEPARATOR;
     }
 
+    // ── Order Cancellation ────────────────────────────────
+
     /**
-     * @notice Recovers the signer of a MigrationOrder after checking the deadline.
+     * @notice Cancel a specific order by its EIP-712 digest hash.
+     * @dev    The caller must be the order signer. Computes the digest from
+     *         the order parameters so only the signer can cancel their own order.
+     * @param merkleRoot      Merkle root from the signed order
+     * @param deadline        Deadline from the signed order
+     * @param settlementData  Settlement data from the signed order
+     */
+    function cancelOrder(
+        bytes32 merkleRoot,
+        uint48 deadline,
+        bytes calldata settlementData
+    ) external {
+        bytes32 structHash = keccak256(
+            abi.encode(MIGRATION_ORDER_TYPEHASH, merkleRoot, deadline, keccak256(settlementData))
+        );
+        bytes32 digest = keccak256(abi.encodePacked("\x19\x01", _DOMAIN_SEPARATOR, structHash));
+
+        cancelledOrders[digest] = true;
+        emit OrderCancelledEvent(msg.sender, digest);
+    }
+
+    /**
+     * @notice Bulk-cancel all orders below a given nonce.
+     * @dev    Sets the caller's minNonce to `newMinNonce`. Any order whose
+     *         nonce (encoded in the deadline field) is below this value will
+     *         be rejected during verification.
+     * @param newMinNonce  The new minimum nonce; must be greater than current.
+     */
+    function incrementNonce(uint256 newMinNonce) external {
+        if (newMinNonce <= minNonce[msg.sender]) revert NonceTooLow();
+        minNonce[msg.sender] = newMinNonce;
+        emit NonceIncremented(msg.sender, newMinNonce);
+    }
+
+    // ── Signature Recovery ────────────────────────────────
+
+    /**
+     * @notice Recovers the signer of a MigrationOrder after checking the deadline
+     *         and cancellation status.
      * @param merkleRoot       Merkle root of allowed actions
      * @param deadline         Order expiry timestamp
      * @param settlementData   Raw settlement data bytes
@@ -57,6 +112,9 @@ abstract contract EIP712OrderVerifier {
         );
         bytes32 digest = keccak256(abi.encodePacked("\x19\x01", _DOMAIN_SEPARATOR, structHash));
 
+        // Check per-order cancellation
+        if (cancelledOrders[digest]) revert OrderCancelled();
+
         assembly {
             let ptr := mload(0x40)
             mstore(ptr, digest)
@@ -72,5 +130,8 @@ abstract contract EIP712OrderVerifier {
         if (signer == address(0)) {
             revert InvalidOrderSignature();
         }
+
+        // Check nonce-based bulk cancellation
+        if (deadline < minNonce[signer]) revert OrderCancelled();
     }
 }

@@ -1,11 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import {
-  buildMigration,
-  buildSimpleMigration,
-  buildCollateralSwap,
-  buildDebtSwap,
-  buildClosePosition,
-} from '../src/flows.js'
+import { Settlement } from '../src/settlement.js'
 import { pairHash } from '../src/merkle.js'
 import { AmountSentinel } from '../src/constants.js'
 import type { Hex } from 'viem'
@@ -27,9 +21,9 @@ const V_DEBT_SRC = '0x0000000000000000000000000000000000000333' as const
 const V_DEBT_DST = '0x0000000000000000000000000000000000000444' as const
 const A_WBTC = '0x0000000000000000000000000000000000000555' as const
 
-describe('buildMigration', () => {
+describe('Settlement.buildMigration', () => {
   it('produces valid calldata for same-asset migration', () => {
-    const result = buildMigration({
+    const result = Settlement.buildMigration({
       collateralAsset: WETH,
       debtAsset: USDC,
       source: { pool: POOL_PRIME, aToken: A_WETH_SRC, debtToken: V_DEBT_SRC },
@@ -56,9 +50,9 @@ describe('buildMigration', () => {
   })
 })
 
-describe('buildSimpleMigration', () => {
+describe('Settlement.buildSimpleMigration', () => {
   it('includes APR check settlement data', () => {
-    const result = buildSimpleMigration({
+    const result = Settlement.buildSimpleMigration({
       collateralAsset: WETH,
       debtAsset: USDC,
       source: { pool: POOL_PRIME, aToken: A_WETH_SRC, debtToken: V_DEBT_SRC },
@@ -74,9 +68,9 @@ describe('buildSimpleMigration', () => {
   })
 })
 
-describe('buildCollateralSwap', () => {
+describe('Settlement.buildCollateralSwap', () => {
   it('produces valid calldata for WETH→WBTC collateral swap', () => {
-    const result = buildCollateralSwap({
+    const result = Settlement.buildCollateralSwap({
       collateralIn: WETH,
       collateralOut: WBTC,
       debtAsset: USDC,
@@ -113,7 +107,7 @@ describe('buildCollateralSwap', () => {
   })
 
   it('includes health factor conditions when provided', () => {
-    const result = buildCollateralSwap({
+    const result = Settlement.buildCollateralSwap({
       collateralIn: WETH,
       collateralOut: WBTC,
       debtAsset: USDC,
@@ -144,9 +138,9 @@ describe('buildCollateralSwap', () => {
   })
 })
 
-describe('buildDebtSwap', () => {
+describe('Settlement.buildDebtSwap', () => {
   it('produces valid calldata for USDC→USDT debt swap', () => {
-    const result = buildDebtSwap({
+    const result = Settlement.buildDebtSwap({
       debtIn: USDC,
       debtOut: USDT,
       collateralAsset: WETH,
@@ -173,9 +167,9 @@ describe('buildDebtSwap', () => {
   })
 })
 
-describe('buildClosePosition', () => {
+describe('Settlement.buildClosePosition', () => {
   it('produces valid calldata for closing a position', () => {
-    const result = buildClosePosition({
+    const result = Settlement.buildClosePosition({
       collateralAsset: WETH,
       debtAsset: USDT,
       pool: { pool: POOL_CORE, aToken: A_WETH_SRC, debtToken: V_DEBT_SRC },
@@ -199,7 +193,7 @@ describe('buildClosePosition', () => {
   })
 
   it('merkle root verifies for all actions', () => {
-    const result = buildClosePosition({
+    const result = Settlement.buildClosePosition({
       collateralAsset: WETH,
       debtAsset: USDT,
       pool: { pool: POOL_CORE, aToken: A_WETH_SRC, debtToken: V_DEBT_SRC },
