@@ -125,16 +125,6 @@ export default function App() {
     }
   }, [orderData])
 
-  const handleSubmitOrder = useCallback(() => {
-    if (!merkleRoot || !orderData) return
-    submitOrder({
-      merkleRoot,
-      settlementData: encodedSettlementData,
-      orderData,
-      leaves: allLeaves,
-    })
-  }, [merkleRoot, orderData, encodedSettlementData, allLeaves, submitOrder])
-
   const { signPermission, signedPermissions, signing, error, clearSignatures } =
     usePermitSignatures(settlementAddress)
 
@@ -145,6 +135,16 @@ export default function App() {
     error: orderError,
     settlementAddress: deployedSettlement,
   } = useOrderSubmission(activeChainId)
+
+  const handleSubmitOrder = useCallback(() => {
+    if (!merkleRoot || !orderData) return
+    submitOrder({
+      merkleRoot,
+      settlementData: encodedSettlementData,
+      orderData,
+      leaves: allLeaves,
+    })
+  }, [merkleRoot, orderData, encodedSettlementData, allLeaves, submitOrder])
 
   const handleChainSelect = useCallback(
     (chainId: number) => {

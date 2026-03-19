@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react'
 import { useAccount, useWalletClient } from 'wagmi'
-import type { Address, Hex } from 'viem'
+import type { Hex } from 'viem'
 import { SETTLEMENT_ADDRESSES, ORDER_BACKEND_URL } from '../config/settlements'
 import type { GeneratedLeaf } from '../lib/merkle'
 
