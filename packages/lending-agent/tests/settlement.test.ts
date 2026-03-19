@@ -23,6 +23,7 @@ import {
 import { describeLeaves } from '../src/order.js'
 import { buildSettlementTx } from '../src/settle.js'
 import type { MerkleLeaf, StoredOrder } from '../src/order.js'
+import { Hex } from 'viem'
 
 // ─── Test fixtures ────────────────────────────────────────────────────────────
 
@@ -69,7 +70,7 @@ const MOCK_ORDER: StoredOrder = {
   createdAt: Date.now(),
   status: 'open',
   signer: '0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045',
-  signature: '0x' + 'ab'.repeat(65),
+  signature: ('0x' + 'ab'.repeat(65)) as Hex,
   order: {
     merkleRoot:    root,
     deadline:      Math.floor(Date.now() / 1000) + 3600,
@@ -184,7 +185,6 @@ describe.skipIf(!canRunE2e)(
     beforeAll(async () => {
       process.env.DRY_RUN = 'true'
       process.env.MODEL ??= 'claude-haiku-4-5'
-      process.env.SETTLEMENT_ADDRESS = SETTLEMENT
 
       // Stub fetch so fetchOrder returns our mock order without a real backend.
       // All other fetches (1delta MCP) are forwarded to the real implementation.
@@ -202,7 +202,6 @@ describe.skipIf(!canRunE2e)(
       vi.unstubAllGlobals()
       delete process.env.DRY_RUN
       delete process.env.MODEL
-      delete process.env.SETTLEMENT_ADDRESS
     })
 
     it('agent proposes a migration and settlement tx is built', async () => {
@@ -219,7 +218,6 @@ describe.skipIf(!canRunE2e)(
           { oneDeltaClient, wdkClient },
           'test-order-1',
           42161,
-          SETTLEMENT,
         )
 
         // In DRY_RUN mode the result is either the agent's text (no migration found)
