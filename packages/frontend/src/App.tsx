@@ -1,6 +1,7 @@
 import { useState, useMemo, useCallback } from 'react'
 import { useAccount, useChainId, useSwitchChain } from 'wagmi'
-import type { Address } from 'viem'
+import type { Address, Hex } from 'viem'
+import { parseUnits } from 'viem'
 import { ChainSelector } from './components/ChainSelector'
 import { LenderList } from './components/LenderList'
 import { AaveTokenSelector } from './components/AaveTokenSelector'
@@ -10,14 +11,23 @@ import { ConnectButton } from './components/ConnectButton'
 import {
   getLendersForChain,
   getAaveTokenPermissions,
+  AAVE_POOLS,
+  COMPOUND_V3_POOLS,
 } from './data/lenders'
 import { usePermitSignatures } from './hooks/usePermitSignatures'
+import { protocolToLenderId } from './lib/merkle'
+import {
+  encodeSettlementData,
+  encodeOrderData,
+  type Condition,
+} from '@1delta/settlement-sdk'
 
 // TODO: replace with actual deployed settlement contract per chain
 const SETTLEMENT_ADDRESS: Address = '0x0000000000000000000000000000000000000001'
 
 /** Map of protocolId -> Set of "tokenType:tokenAddress" keys */
 export type SelectedTokenPerms = Record<string, Set<string>>
+type HfMode = 'all' | 'per_lender' // set per lender or all lenders
 
 export default function App() {
   const { isConnected } = useAccount()
@@ -27,6 +37,10 @@ export default function App() {
   const [selectedChainId, setSelectedChainId] = useState<number | null>(null)
   const [selectedLenderIds, setSelectedLenderIds] = useState<Set<string>>(new Set())
   const [selectedTokenPerms, setSelectedTokenPerms] = useState<SelectedTokenPerms>({})
+  const [minHealthFactor, setMinHealthFactor] = useState<string>('')
+  const [hfMode, setHfMode] = useState<HfMode>('all')
+  const [perLenderHealthFactor, setPerLenderHealthFactor] = useState<Record<string, string>>({})
+  const [merkleRoot, setMerkleRoot] = useState<Hex | null>(null)
 
   const activeChainId = selectedChainId ?? connectedChainId
 
@@ -45,6 +59,70 @@ export default function App() {
     [selectedLenders],
   )
 
+  const lendersForSafety = useMemo(
+    () => selectedLenders.filter((l) => l.family === 'AAVE' || l.family === 'COMPOUND_V3'),
+    [selectedLenders],
+  )
+
+  const handleRootChange = useCallback((root: Hex | null) => {
+    setMerkleRoot(root)
+  }, [])
+
+  const { orderData, conditionCount } = useMemo(() => {
+    if (!merkleRoot || !activeChainId) return { orderData: null as Hex | null, conditionCount: 0 }
+
+    const conditions: Condition[] = []
+    const getHfForLender = (lenderId: string): bigint | null => {
+      const raw = hfMode === 'all' ? minHealthFactor : (perLenderHealthFactor[lenderId] ?? '')
+      const num = raw.trim() ? parseFloat(raw) : 0
+      if (num < 1.0) return null
+      return parseUnits(raw.trim(), 18)
+    }
+
+    {
+      const cid = String(activeChainId)
+      for (const lender of selectedLenders) {
+        const hf = getHfForLender(lender.id)
+        if (hf === null) continue
+        if (lender.family === 'AAVE') {
+          const poolConfig = AAVE_POOLS[lender.id]?.[cid]
+          const selectedKeys = selectedTokenPerms[lender.id]
+          if (poolConfig && selectedKeys && selectedKeys.size > 0) {
+            conditions.push({
+              lenderId: protocolToLenderId(lender.id),
+              pool: poolConfig.pool,
+              minHealthFactor: hf,
+            })
+          }
+        } else if (lender.family === 'COMPOUND_V3') {
+          const comet = COMPOUND_V3_POOLS[cid]?.[lender.id]
+          if (comet) {
+            conditions.push({
+              lenderId: protocolToLenderId(lender.id),
+              comet,
+              assetBitmap: 0xFFFF, // all collateral assets
+              minHealthFactor: hf,
+            })
+          }
+        }
+      }
+    }
+
+    const settlementData =
+      conditions.length > 0
+        ? encodeSettlementData([], conditions)
+        : ('0x' as Hex)
+    const orderData = encodeOrderData(merkleRoot, settlementData)
+
+    return { orderData, conditionCount: conditions.length }
+  }, [merkleRoot, activeChainId, hfMode, minHealthFactor, perLenderHealthFactor, selectedLenders, selectedTokenPerms])
+
+  const handleCopyOrderData = useCallback(() => {
+    if (orderData) {
+      void navigator.clipboard.writeText(orderData)
+    }
+  }, [orderData])
+
   const { signPermission, signedPermissions, signing, error, clearSignatures } =
     usePermitSignatures(SETTLEMENT_ADDRESS)
 
@@ -53,6 +131,7 @@ export default function App() {
       setSelectedChainId(chainId)
       setSelectedLenderIds(new Set())
       setSelectedTokenPerms({})
+      setPerLenderHealthFactor({})
       clearSignatures()
       if (isConnected && chainId !== connectedChainId) {
         switchChain({ chainId })
@@ -68,6 +147,11 @@ export default function App() {
         next.delete(lenderId)
         // Also remove token perms for this lender
         setSelectedTokenPerms(prev => {
+          const copy = { ...prev }
+          delete copy[lenderId]
+          return copy
+        })
+        setPerLenderHealthFactor(prev => {
           const copy = { ...prev }
           delete copy[lenderId]
           return copy
@@ -204,14 +288,139 @@ export default function App() {
             </div>
           )}
 
-          {/* Merkle leaves section */}
-          {activeChainId && selectedLenders.some(l => l.family === 'AAVE') && (
-            <section>
+          {/* HF (liquidation preventer) + Merkle + Order data */}
+          {activeChainId && selectedLenders.some(l => l.family === 'AAVE' || l.family === 'COMPOUND_V3') && (
+            <section className="space-y-6">
+              {/* Health factor checks (Liquidation preventer) */}
+              <div className="rounded-lg border border-gray-800 bg-gray-900/50 p-4">
+                <h2 className="text-lg font-semibold text-gray-300 mb-2">
+                  Liquidation Preventer
+                </h2>
+                <p className="text-sm text-gray-500 mb-3">
+                  Minimum health factor after settlement (e.g. 1.05 = 5% buffer, 1.2 = 20% buffer).
+                  Leave empty for no condition.
+                </p>
+                <div className="flex flex-wrap items-center gap-4 mb-4">
+                  <label className="inline-flex items-center gap-2 text-sm text-gray-300">
+                    <input
+                      type="radio"
+                      name="hf-mode"
+                      checked={hfMode === 'all'}
+                      onChange={() => setHfMode('all')}
+                    />
+                    Set for all selected lenders
+                  </label>
+                  <label className="inline-flex items-center gap-2 text-sm text-gray-300">
+                    <input
+                      type="radio"
+                      name="hf-mode"
+                      checked={hfMode === 'per_lender'}
+                      onChange={() => setHfMode('per_lender')}
+                    />
+                    Set per lender
+                  </label>
+                </div>
+                {hfMode === 'all' ? (
+                  <input
+                    type="number"
+                    min="1"
+                    step="0.05"
+                    placeholder="e.g. 1.2"
+                    value={minHealthFactor}
+                    onChange={(e) => setMinHealthFactor(e.target.value)}
+                    className="w-full max-w-xs px-3 py-2 rounded-lg bg-gray-800 border border-gray-700 text-gray-200 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
+                  />
+                ) : (
+                  <div className="space-y-2">
+                    {lendersForSafety.length === 0 ? (
+                      <div className="text-sm text-gray-500">Select Aave or Compound V3 lenders first.</div>
+                    ) : (
+                      lendersForSafety.map((lender) => {
+                        const raw = perLenderHealthFactor[lender.id] ?? ''
+                        const num = raw.trim() ? parseFloat(raw) : 0
+
+                        const cid = String(activeChainId)
+                        const willApply =
+                          num >= 1.0 &&
+                          (lender.family === 'COMPOUND_V3'
+                            ? Boolean(COMPOUND_V3_POOLS[cid]?.[lender.id])
+                            : lender.family === 'AAVE'
+                              ? Boolean(AAVE_POOLS[lender.id]?.[cid]) &&
+                                Boolean(selectedTokenPerms[lender.id] && selectedTokenPerms[lender.id].size > 0)
+                              : false)
+
+                        return (
+                          <div key={lender.id} className="flex items-center gap-3">
+                            <div className="text-sm text-gray-300 min-w-44 flex items-center gap-2">
+                              <span>{lender.label}</span>
+                              <span
+                                className={`text-[10px] px-2 py-0.5 rounded-full border ${
+                                  willApply
+                                    ? 'text-emerald-400 border-emerald-500/30 bg-emerald-500/10'
+                                    : 'text-gray-400 border-gray-700 bg-gray-800/50'
+                                }`}
+                                title={
+                                  willApply
+                                    ? 'This lender will be included in settlementData conditions'
+                                    : 'Set HF ≥ 1.0 and ensure the lender has selections (Aave tokens / C3 market) to include it'
+                                }
+                              >
+                                {willApply ? 'Active' : 'Inactive'}
+                              </span>
+                            </div>
+                          <input
+                            type="number"
+                            min="1"
+                            step="0.05"
+                            placeholder="e.g. 1.2"
+                            value={perLenderHealthFactor[lender.id] ?? ''}
+                            onChange={(e) =>
+                              setPerLenderHealthFactor((prev) => ({ ...prev, [lender.id]: e.target.value }))
+                            }
+                            className="w-full max-w-xs px-3 py-2 rounded-lg bg-gray-800 border border-gray-700 text-gray-200 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
+                          />
+                          </div>
+                        )
+                      })
+                    )}
+                  </div>
+                )}
+              </div>
+
               <MerklePanel
                 chainId={activeChainId}
                 selectedLenders={selectedLenders}
                 selectedTokenPerms={selectedTokenPerms}
+                onRootChange={handleRootChange}
               />
+
+              {/* Order data (signed payload) */}
+              {orderData && (
+                <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-4">
+                  <h2 className="text-lg font-semibold text-amber-400 mb-2">
+                    Order Data (Signed Payload)
+                  </h2>
+                  <p className="text-sm text-gray-500 mb-2">
+                    {conditionCount > 0
+                      ? hfMode === 'all'
+                        ? `Conditions: ${conditionCount}, min HF (all): ${minHealthFactor || '—'}`
+                        : `Conditions: ${conditionCount}, min HF mode: per lender`
+                      : 'No conditions'}
+                  </p>
+                  <div className="flex items-start gap-3">
+                    <pre className="flex-1 text-xs font-mono text-amber-200/90 break-all overflow-x-auto max-h-24 overflow-y-auto">
+                      {orderData}
+                    </pre>
+                    <button
+                      type="button"
+                      onClick={handleCopyOrderData}
+                      className="shrink-0 px-3 py-1.5 rounded-lg bg-amber-500/20 text-amber-400 hover:bg-amber-500/30 text-sm font-medium"
+                    >
+                      Copy
+                    </button>
+                  </div>
+                </div>
+              )}
             </section>
           )}
         </div>
