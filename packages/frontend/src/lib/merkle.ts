@@ -210,9 +210,97 @@ export function buildAaveLeavesForToken(input: AaveLeafInput): GeneratedLeaf[] {
   return leaves
 }
 
+export const CompoundV3Data = {
+  /** DEPOSIT data: [20: comet] */
+  deposit(comet: Address): Hex {
+    return encodePacked(['address'], [comet])
+  },
+
+  /** BORROW data: [20: comet] */
+  borrow(comet: Address): Hex {
+    return encodePacked(['address'], [comet])
+  },
+
+  /** REPAY data: [20: comet] */
+  repay(comet: Address): Hex {
+    return encodePacked(['address'], [comet])
+  },
+
+  /** WITHDRAW data: [1: isBase][20: comet] — isBase 0 = collateral, 1 = base asset */
+  withdraw(comet: Address, isBase: number = 0): Hex {
+    return encodePacked(['uint8', 'address'], [isBase, comet])
+  },
+}
+
+export interface CompoundV3LeafInput {
+  protocolId: string
+  comet: Address
+  lenderId: number
+}
+
+
+export function buildCompoundV3LeavesForComet(input: CompoundV3LeafInput): GeneratedLeaf[] {
+  const { protocolId, comet, lenderId } = input
+  const leaves: GeneratedLeaf[] = []
+
+  const repayData = CompoundV3Data.repay(comet)
+  leaves.push({
+    leaf: buildLeaf({ op: LenderOps.REPAY, lender: lenderId, data: repayData }),
+    op: LenderOps.REPAY,
+    opName: 'Repay',
+    lender: lenderId,
+    protocolId,
+    underlying: comet,
+    tokenAddress: comet,
+    tokenType: 'pool',
+    data: repayData,
+  })
+
+  const withdrawData = CompoundV3Data.withdraw(comet, 0)
+  leaves.push({
+    leaf: buildLeaf({ op: LenderOps.WITHDRAW, lender: lenderId, data: withdrawData }),
+    op: LenderOps.WITHDRAW,
+    opName: 'Withdraw',
+    lender: lenderId,
+    protocolId,
+    underlying: comet,
+    tokenAddress: comet,
+    tokenType: 'pool',
+    data: withdrawData,
+  })
+
+  const depositData = CompoundV3Data.deposit(comet)
+  leaves.push({
+    leaf: buildLeaf({ op: LenderOps.DEPOSIT, lender: lenderId, data: depositData }),
+    op: LenderOps.DEPOSIT,
+    opName: 'Deposit',
+    lender: lenderId,
+    protocolId,
+    underlying: comet,
+    tokenAddress: comet,
+    tokenType: 'pool',
+    data: depositData,
+  })
+
+  const borrowData = CompoundV3Data.borrow(comet)
+  leaves.push({
+    leaf: buildLeaf({ op: LenderOps.BORROW, lender: lenderId, data: borrowData }),
+    op: LenderOps.BORROW,
+    opName: 'Borrow',
+    lender: lenderId,
+    protocolId,
+    underlying: comet,
+    tokenAddress: comet,
+    tokenType: 'pool',
+    data: borrowData,
+  })
+
+  return leaves
+}
+
 /** Map protocol ID to lender ID range */
 export function protocolToLenderId(protocolId: string): number {
   if (protocolId === 'AAVE_V2') return LENDER_ID_AAVE_V2
-  // All other Aave forks use V3 interface
+  if (protocolId.startsWith('COMPOUND_V3_')) return LENDER_ID_COMPOUND_V3
   return LENDER_ID_AAVE_V3
 }
