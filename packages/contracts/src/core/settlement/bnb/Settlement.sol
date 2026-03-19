@@ -42,8 +42,9 @@ contract Settlement is
 
     function _postSettlementCheck(
         address callerAddress,
-        bytes memory settlementData
+        bytes memory settlementData,
+        uint256 riskyLenderMask
     ) internal view override(SettlementBase, SettlementExecutor) {
-        SettlementBase._postSettlementCheck(callerAddress, settlementData);
+        SettlementBase._postSettlementCheck(callerAddress, settlementData, riskyLenderMask);
     }
 }

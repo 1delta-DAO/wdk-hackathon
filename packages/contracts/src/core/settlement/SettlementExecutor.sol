@@ -71,6 +71,12 @@ abstract contract SettlementExecutor is UniversalSettlementLending {
     /// @dev LenderOps.BORROW — must match DeltaEnums.sol
     uint256 private constant OP_BORROW = 1;
 
+    /// @dev LenderOps.WITHDRAW — must match DeltaEnums.sol
+    uint256 private constant OP_WITHDRAW = 3;
+
+    /// @dev LenderOps.WITHDRAW_LENDING_TOKEN — must match DeltaEnums.sol
+    uint256 private constant OP_WITHDRAW_LENDING_TOKEN = 5;
+
     /// @dev Fee denominator — allows sub-basis-point precision.
     ///      100% = 1e7.  1 bps = 1 000.  0.01 bps = 10.  1 unit = 0.0001 bps.
     uint256 private constant FEE_DENOMINATOR = 1e7;
@@ -334,9 +340,10 @@ abstract contract SettlementExecutor is UniversalSettlementLending {
 
         AssetDelta[] memory deltas = new AssetDelta[](numPre + numPost);
         uint256 deltaCount;
+        uint256 riskyLenderMask;
 
         // ── Stage 1: pre-actions ──
-        (execOffset, deltaCount) = _executeActions(
+        (execOffset, deltaCount, riskyLenderMask) = _executeActions(
             callerAddress, merkleRoot, executionData, execOffset, numPre, deltas, deltaCount
         );
 
@@ -345,16 +352,25 @@ abstract contract SettlementExecutor is UniversalSettlementLending {
             callerAddress, settlementData, fillerCalldata, deltas, deltaCount
         );
 
-        // ── Stage 3: post-actions ──
-        (execOffset, deltaCount) = _executeActions(
-            callerAddress, merkleRoot, executionData, execOffset, numPost, deltas, deltaCount
-        );
+        {
+            // ── Stage 3: post-actions ──
+            uint256 postMask;
+            (execOffset, deltaCount, postMask) = _executeActions(
+                callerAddress, merkleRoot, executionData, execOffset, numPost, deltas, deltaCount
+            );
+            riskyLenderMask |= postMask;
+        }
 
         // ── Stage 4: sweep borrow fees, verify no deficits ──
         _sweepAndVerify(deltas, deltaCount, callerAddress, feeRecipient, maxFeeBps);
 
-        // ── Stage 6: post-settlement conditions (health factor, etc.) ──
-        _postSettlementCheck(callerAddress, settlementData);
+        // ── Stage 5: post-settlement conditions (health factor, etc.) ──
+        // Only run for lender buckets that had a borrow or withdraw.
+        // Deposits and repays can only improve health, so skipping them
+        // avoids blocking migrations from bad positions to better ones.
+        if (riskyLenderMask != 0) {
+            _postSettlementCheck(callerAddress, settlementData, riskyLenderMask);
+        }
     }
 
     // ── Merkle-verified action batch ────────────────────────
@@ -370,7 +386,7 @@ abstract contract SettlementExecutor is UniversalSettlementLending {
         uint256 count,
         AssetDelta[] memory deltas,
         uint256 deltaCount
-    ) internal returns (uint256 newExecOffset, uint256 newDeltaCount) {
+    ) internal returns (uint256 newExecOffset, uint256 newDeltaCount, uint256 riskyLenderMask) {
         newExecOffset = execOffset;
         newDeltaCount = deltaCount;
 
@@ -443,6 +459,19 @@ abstract contract SettlementExecutor is UniversalSettlementLending {
                     newExecOffset,
                     add(add(60, dataLen), mul(proofLen, 32))
                 )
+            }
+
+            // Track borrow/withdraw ops per lender bucket — only these can worsen health.
+            // Bitmap: bit 0 = Aave (<2000), bit 1 = CompV3 (<3000), bit 2 = CompV2 (<4000),
+            //         bit 3 = Morpho (<5000), bit 4 = Silo (<6000)
+            if (op == OP_BORROW || op == OP_WITHDRAW || op == OP_WITHDRAW_LENDING_TOKEN) {
+                uint256 bucket;
+                if (lender < 2000) bucket = 0;
+                else if (lender < 3000) bucket = 1;
+                else if (lender < 4000) bucket = 2;
+                else if (lender < 5000) bucket = 3;
+                else bucket = 4;
+                riskyLenderMask |= (1 << bucket);
             }
 
             newDeltaCount = _dispatchAndAccumulate(
@@ -618,8 +647,16 @@ abstract contract SettlementExecutor is UniversalSettlementLending {
      * @param callerAddress  The order signer / position owner.
      * @param settlementData The user-signed settlement parameters (extracted from orderData).
      */
+    /**
+     * @notice Post-settlement health factor checks. Only called for lender
+     *         buckets that had a borrow or withdraw (bitmap in riskyLenderMask).
+     * @param riskyLenderMask Bitmap of lender buckets with risky ops:
+     *        bit 0 = Aave (<2000), bit 1 = CompV3 (<3000), bit 2 = CompV2 (<4000),
+     *        bit 3 = Morpho (<5000), bit 4 = Silo (<6000)
+     */
     function _postSettlementCheck(
         address callerAddress,
-        bytes memory settlementData
+        bytes memory settlementData,
+        uint256 riskyLenderMask
     ) internal virtual {}
 }

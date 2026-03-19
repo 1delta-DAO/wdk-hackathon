@@ -15,15 +15,14 @@ import {
   COMPOUND_V3_POOLS,
 } from './data/lenders'
 import { usePermitSignatures } from './hooks/usePermitSignatures'
-import { protocolToLenderId } from './lib/merkle'
+import { useOrderSubmission } from './hooks/useOrderSubmission'
+import { protocolToLenderId, type GeneratedLeaf } from './lib/merkle'
+import { SETTLEMENT_ADDRESSES } from './config/settlements'
 import {
   encodeSettlementData,
   encodeOrderData,
   type Condition,
 } from '@1delta/settlement-sdk'
-
-// TODO: replace with actual deployed settlement contract per chain
-const SETTLEMENT_ADDRESS: Address = '0x0000000000000000000000000000000000000001'
 
 /** Map of protocolId -> Set of "tokenType:tokenAddress" keys */
 export type SelectedTokenPerms = Record<string, Set<string>>
@@ -41,8 +40,10 @@ export default function App() {
   const [hfMode, setHfMode] = useState<HfMode>('all')
   const [perLenderHealthFactor, setPerLenderHealthFactor] = useState<Record<string, string>>({})
   const [merkleRoot, setMerkleRoot] = useState<Hex | null>(null)
+  const [allLeaves, setAllLeaves] = useState<GeneratedLeaf[]>([])
 
   const activeChainId = selectedChainId ?? connectedChainId
+  const settlementAddress = activeChainId ? (SETTLEMENT_ADDRESSES[activeChainId] ?? '0x0000000000000000000000000000000000000001' as Address) : '0x0000000000000000000000000000000000000001' as Address
 
   const lenders = useMemo(
     () => (activeChainId ? getLendersForChain(activeChainId) : []),
@@ -64,12 +65,13 @@ export default function App() {
     [selectedLenders],
   )
 
-  const handleRootChange = useCallback((root: Hex | null) => {
+  const handleRootChange = useCallback((root: Hex | null, leaves?: GeneratedLeaf[]) => {
     setMerkleRoot(root)
+    setAllLeaves(leaves ?? [])
   }, [])
 
-  const { orderData, conditionCount } = useMemo(() => {
-    if (!merkleRoot || !activeChainId) return { orderData: null as Hex | null, conditionCount: 0 }
+  const { orderData, settlementData: encodedSettlementData, conditionCount } = useMemo(() => {
+    if (!merkleRoot || !activeChainId) return { orderData: null as Hex | null, settlementData: '0x' as Hex, conditionCount: 0 }
 
     const conditions: Condition[] = []
     const getHfForLender = (lenderId: string): bigint | null => {
@@ -114,7 +116,7 @@ export default function App() {
         : ('0x' as Hex)
     const orderData = encodeOrderData(merkleRoot, settlementData)
 
-    return { orderData, conditionCount: conditions.length }
+    return { orderData, settlementData, conditionCount: conditions.length }
   }, [merkleRoot, activeChainId, hfMode, minHealthFactor, perLenderHealthFactor, selectedLenders, selectedTokenPerms])
 
   const handleCopyOrderData = useCallback(() => {
@@ -124,7 +126,25 @@ export default function App() {
   }, [orderData])
 
   const { signPermission, signedPermissions, signing, error, clearSignatures } =
-    usePermitSignatures(SETTLEMENT_ADDRESS)
+    usePermitSignatures(settlementAddress)
+
+  const {
+    submitOrder,
+    submitting: orderSubmitting,
+    submitted: orderSubmitted,
+    error: orderError,
+    settlementAddress: deployedSettlement,
+  } = useOrderSubmission(activeChainId)
+
+  const handleSubmitOrder = useCallback(() => {
+    if (!merkleRoot || !orderData) return
+    submitOrder({
+      merkleRoot,
+      settlementData: encodedSettlementData,
+      orderData,
+      leaves: allLeaves,
+    })
+  }, [merkleRoot, orderData, encodedSettlementData, allLeaves, submitOrder])
 
   const handleChainSelect = useCallback(
     (chainId: number) => {
@@ -282,7 +302,7 @@ export default function App() {
                   error={error}
                   onSign={signPermission}
                   onSignAll={handleSignAll}
-                  settlementAddress={SETTLEMENT_ADDRESS}
+                  settlementAddress={settlementAddress}
                 />
               </section>
             </div>
@@ -398,7 +418,7 @@ export default function App() {
               {orderData && (
                 <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-4">
                   <h2 className="text-lg font-semibold text-amber-400 mb-2">
-                    Order Data (Signed Payload)
+                    Order Data
                   </h2>
                   <p className="text-sm text-gray-500 mb-2">
                     {conditionCount > 0
@@ -406,19 +426,42 @@ export default function App() {
                         ? `Conditions: ${conditionCount}, min HF (all): ${minHealthFactor || '—'}`
                         : `Conditions: ${conditionCount}, min HF mode: per lender`
                       : 'No conditions'}
+                    {deployedSettlement
+                      ? ` · Settlement: ${deployedSettlement.slice(0, 6)}...${deployedSettlement.slice(-4)}`
+                      : ' · No settlement deployed on this chain'}
                   </p>
                   <div className="flex items-start gap-3">
                     <pre className="flex-1 text-xs font-mono text-amber-200/90 break-all overflow-x-auto max-h-24 overflow-y-auto">
                       {orderData}
                     </pre>
-                    <button
-                      type="button"
-                      onClick={handleCopyOrderData}
-                      className="shrink-0 px-3 py-1.5 rounded-lg bg-amber-500/20 text-amber-400 hover:bg-amber-500/30 text-sm font-medium"
-                    >
-                      Copy
-                    </button>
+                    <div className="shrink-0 flex flex-col gap-2">
+                      <button
+                        type="button"
+                        onClick={handleCopyOrderData}
+                        className="px-3 py-1.5 rounded-lg bg-amber-500/20 text-amber-400 hover:bg-amber-500/30 text-sm font-medium"
+                      >
+                        Copy
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleSubmitOrder}
+                        disabled={orderSubmitting || !deployedSettlement || !isConnected}
+                        className="px-3 py-1.5 rounded-lg bg-indigo-500/20 text-indigo-400 hover:bg-indigo-500/30 text-sm font-medium disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
+                        {orderSubmitting ? 'Signing...' : 'Sign & Submit'}
+                      </button>
+                    </div>
                   </div>
+                  {orderSubmitted && (
+                    <div className="mt-3 text-sm text-emerald-400">
+                      Order submitted! ID: {orderSubmitted.id}
+                    </div>
+                  )}
+                  {orderError && (
+                    <div className="mt-3 text-sm text-red-400">
+                      {orderError}
+                    </div>
+                  )}
                 </div>
               )}
             </section>
