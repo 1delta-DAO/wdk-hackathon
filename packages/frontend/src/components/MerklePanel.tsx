@@ -1,9 +1,10 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo } from 'react'
 import type { Address, Hex } from 'viem'
 import type { LenderProtocol } from '../data/lenders'
-import { AAVE_POOLS, getAaveTokenPermissions } from '../data/lenders'
+import { AAVE_POOLS, COMPOUND_V3_POOLS, getAaveTokenPermissions } from '../data/lenders'
 import {
   buildAaveLeavesForToken,
+  buildCompoundV3LeavesForComet,
   buildMerkleTree,
   protocolToLenderId,
   type GeneratedLeaf,
@@ -14,6 +15,7 @@ interface Props {
   chainId: number
   selectedLenders: LenderProtocol[]
   selectedTokenPerms: SelectedTokenPerms
+  onRootChange?: (root: Hex | null) => void
 }
 
 const OP_COLORS: Record<string, string> = {
@@ -23,47 +25,53 @@ const OP_COLORS: Record<string, string> = {
   Withdraw: 'text-purple-400 bg-purple-500/10',
 }
 
-export function MerklePanel({ chainId, selectedLenders, selectedTokenPerms }: Props) {
+export function MerklePanel({ chainId, selectedLenders, selectedTokenPerms, onRootChange }: Props) {
   const { leaves, root, proofs } = useMemo(() => {
     const allLeaves: GeneratedLeaf[] = []
     const cid = String(chainId)
 
     for (const lender of selectedLenders) {
-      if (lender.family !== 'AAVE') continue
+      if (lender.family === 'AAVE') {
+        const poolConfig = AAVE_POOLS[lender.id]?.[cid]
+        if (!poolConfig) continue
 
-      const poolConfig = AAVE_POOLS[lender.id]?.[cid]
-      if (!poolConfig) continue
+        const selectedKeys = selectedTokenPerms[lender.id]
+        if (!selectedKeys || selectedKeys.size === 0) continue
 
-      const selectedKeys = selectedTokenPerms[lender.id]
-      if (!selectedKeys || selectedKeys.size === 0) continue
-
-      // Get the token permissions to find underlying -> aToken/vToken mappings
-      const tokenPerms = getAaveTokenPermissions(lender.id, chainId)
-
-      // Group by underlying to find which underlyings are selected
-      const selectedUnderlyings = new Set<string>()
-      for (const perm of tokenPerms) {
-        const key = `${perm.tokenType}:${perm.tokenAddress}`
-        if (selectedKeys.has(key)) {
-          selectedUnderlyings.add(perm.underlying)
+        const tokenPerms = getAaveTokenPermissions(lender.id, chainId)
+        const selectedUnderlyings = new Set<string>()
+        for (const perm of tokenPerms) {
+          const key = `${perm.tokenType}:${perm.tokenAddress}`
+          if (selectedKeys.has(key)) {
+            selectedUnderlyings.add(perm.underlying)
+          }
         }
-      }
 
-      // For each selected underlying, build leaves
-      for (const underlying of selectedUnderlyings) {
-        const permsForUnderlying = tokenPerms.filter(p => p.underlying === underlying)
-        const aTokenPerm = permsForUnderlying.find(p => p.tokenType === 'aToken')
-        const vTokenPerm = permsForUnderlying.find(p => p.tokenType === 'vToken')
+        for (const underlying of selectedUnderlyings) {
+          const permsForUnderlying = tokenPerms.filter(p => p.underlying === underlying)
+          const aTokenPerm = permsForUnderlying.find(p => p.tokenType === 'aToken')
+          const vTokenPerm = permsForUnderlying.find(p => p.tokenType === 'vToken')
 
-        const tokenLeaves = buildAaveLeavesForToken({
+          const tokenLeaves = buildAaveLeavesForToken({
+            protocolId: lender.id,
+            underlying: underlying as Address,
+            aToken: aTokenPerm?.tokenAddress,
+            vToken: vTokenPerm?.tokenAddress,
+            pool: poolConfig.pool,
+            lenderId: protocolToLenderId(lender.id),
+          })
+          allLeaves.push(...tokenLeaves)
+        }
+      } else if (lender.family === 'COMPOUND_V3') {
+        const comet = COMPOUND_V3_POOLS[cid]?.[lender.id]
+        if (!comet) continue
+
+        const c3Leaves = buildCompoundV3LeavesForComet({
           protocolId: lender.id,
-          underlying: underlying as Address,
-          aToken: aTokenPerm?.tokenAddress,
-          vToken: vTokenPerm?.tokenAddress,
-          pool: poolConfig.pool,
+          comet,
           lenderId: protocolToLenderId(lender.id),
         })
-        allLeaves.push(...tokenLeaves)
+        allLeaves.push(...c3Leaves)
       }
     }
 
@@ -77,10 +85,14 @@ export function MerklePanel({ chainId, selectedLenders, selectedTokenPerms }: Pr
     return { leaves: allLeaves, root: tree.root, proofs: tree.proofs }
   }, [chainId, selectedLenders, selectedTokenPerms])
 
+  useEffect(() => {
+    onRootChange?.(root ?? null)
+  }, [root, onRootChange])
+
   if (leaves.length === 0) {
     return (
       <div className="text-gray-500 text-sm py-8 text-center">
-        Select Aave tokens to auto-generate merkle leaves
+        Select Aave tokens or Compound V3 markets to auto-generate merkle leaves
       </div>
     )
   }
