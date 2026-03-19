@@ -1,0 +1,13 @@
+name = "order-backend"
+main = "src/index.ts"
+compatibility_date = "2025-03-01"
+
+# Durable Objects for persistent order storage
+[durable_objects]
+bindings = [
+  { name = "ORDERBOOK", class_name = "Orderbook" }
+]
+
+[[migrations]]
+tag = "v1"
+new_classes = ["Orderbook"]

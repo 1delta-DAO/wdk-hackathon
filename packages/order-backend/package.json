@@ -1,0 +1,16 @@
+{
+  "name": "@wdk-hackathon/order-backend",
+  "version": "0.1.0",
+  "description": "Cloudflare Worker that collects settlement orders from frontends and serves them to AI agents",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250313.0",
+    "typescript": "^5.7.0",
+    "wrangler": "^4.14.0"
+  }
+}
