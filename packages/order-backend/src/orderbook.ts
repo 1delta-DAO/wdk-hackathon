@@ -153,6 +153,16 @@ function validateSignedOrder(body: unknown): string | null {
   if (!order.chainId || typeof order.chainId !== 'number') return 'Missing order.chainId'
   if (order.maxFeeBps === undefined || typeof order.maxFeeBps !== 'number') return 'Missing order.maxFeeBps'
 
+  if (!Array.isArray(order.leaves) || order.leaves.length === 0) return 'Missing order.leaves (must be non-empty array of merkle leaves)'
+  for (let i = 0; i < (order.leaves as unknown[]).length; i++) {
+    const leaf = (order.leaves as Record<string, unknown>[])[i]
+    if (typeof leaf.op !== 'number') return `leaves[${i}].op must be a number`
+    if (typeof leaf.lender !== 'number') return `leaves[${i}].lender must be a number`
+    if (typeof leaf.data !== 'string') return `leaves[${i}].data must be a hex string`
+    if (typeof leaf.leaf !== 'string') return `leaves[${i}].leaf must be a hex string`
+    if (!Array.isArray(leaf.proof)) return `leaves[${i}].proof must be an array`
+  }
+
   return null
 }
 
