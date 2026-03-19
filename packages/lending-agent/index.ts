@@ -1,12 +1,129 @@
 /**
- * 1delta × WDK Lending Agent
+ * Node.js HTTP server entry point — mirrors the Cloudflare Worker routes in worker.ts.
  *
- * Finds the best lending market via 1delta MCP and executes a deposit via WDK MCP.
+ * Routes:
+ *   GET  /health         — liveness check
+ *   GET  /address        — agent wallet address (public)
+ *   POST /settle/all     — run settlement for all open orders (Bearer-protected)
+ *                          body: { chainId: number }
+ *
+ * Cron: runs the settlement loop every hour via setInterval.
+ *
+ * Environment variables (set in .env):
+ *   ANTHROPIC_API_KEY, WDK_SEED, ORDER_BACKEND_URL, API_SECRET,
+ *   ONEDELTA_API_KEY (optional), MODEL (optional), DRY_RUN (optional),
+ *   CRON_CHAIN_IDS (optional, comma-separated, default "42161"),
+ *   PORT (optional, default 3000)
  */
 
-import { main } from './src/main.js'
+import { createServer, IncomingMessage, ServerResponse } from 'node:http'
+import { connectOneDelta, connectWdk, callTool } from './src/mcp.js'
+import { runAllSettlements } from './src/main.js'
 
-main().catch(err => {
-  console.error('Fatal:', err instanceof Error ? err.message : err)
-  process.exit(1)
+const PORT = Number(process.env.PORT ?? 3000)
+const API_SECRET = process.env.API_SECRET ?? ''
+const CRON_CHAIN_IDS = (process.env.CRON_CHAIN_IDS ?? '42161')
+  .split(',').map(s => Number(s.trim())).filter(Boolean)
+
+// ── Auth ──────────────────────────────────────────────────────────────────────
+
+function bearerOk (req: IncomingMessage): boolean {
+  const auth = req.headers['authorization'] ?? ''
+  const token = auth.startsWith('Bearer ') ? auth.slice(7) : ''
+  return !!API_SECRET && token === API_SECRET
+}
+
+// ── Response helpers ──────────────────────────────────────────────────────────
+
+function json (res: ServerResponse, status: number, body: unknown): void {
+  const payload = JSON.stringify(body)
+  res.writeHead(status, { 'Content-Type': 'application/json' })
+  res.end(payload)
+}
+
+async function readBody (req: IncomingMessage): Promise<Record<string, unknown>> {
+  return new Promise((resolve) => {
+    const chunks: Buffer[] = []
+    req.on('data', c => chunks.push(c))
+    req.on('end', () => {
+      try { resolve(JSON.parse(Buffer.concat(chunks).toString())) }
+      catch { resolve({}) }
+    })
+  })
+}
+
+// ── Settlement helper ─────────────────────────────────────────────────────────
+
+async function runSettle (chainId: number) {
+  const [oneDeltaClient, wdkClient] = await Promise.all([connectOneDelta(), connectWdk()])
+  try {
+    return await runAllSettlements({ oneDeltaClient, wdkClient }, chainId)
+  } finally {
+    await Promise.allSettled([oneDeltaClient.close(), wdkClient.close()])
+  }
+}
+
+// ── HTTP server ───────────────────────────────────────────────────────────────
+
+const server = createServer(async (req, res) => {
+  const url = new URL(req.url ?? '/', `http://localhost:${PORT}`)
+
+  // GET /health
+  if (req.method === 'GET' && url.pathname === '/health') {
+    return json(res, 200, { status: 'ok' })
+  }
+
+  // GET /address
+  if (req.method === 'GET' && url.pathname === '/address') {
+    const wdkClient = await connectWdk()
+    try {
+      const address = await callTool(wdkClient, 'getAddress', { chain: 'ethereum' })
+      return json(res, 200, { address })
+    } finally {
+      await wdkClient.close()
+    }
+  }
+
+  // POST /settle/all  (Bearer-protected)
+  if (req.method === 'POST' && url.pathname === '/settle/all') {
+    if (!bearerOk(req)) {
+      res.writeHead(401, { 'WWW-Authenticate': 'Bearer' })
+      return res.end(JSON.stringify({ error: 'Unauthorized' }))
+    }
+
+    const body = await readBody(req)
+    const chainId = Number(body.chainId)
+    if (!chainId) return json(res, 400, { error: 'chainId required' })
+
+    const results = await runSettle(chainId)
+    return json(res, 200, { results })
+  }
+
+  json(res, 404, { error: 'Not found' })
 })
+
+server.listen(PORT, () => {
+  console.log(`lending-agent HTTP server listening on http://localhost:${PORT}`)
+})
+
+// ── Hourly cron ───────────────────────────────────────────────────────────────
+
+async function cronJob () {
+  console.log(`[cron] Starting hourly settlement run for chains: ${CRON_CHAIN_IDS.join(', ')}`)
+  for (const chainId of CRON_CHAIN_IDS) {
+    console.log(`[cron] Processing chain ${chainId}…`)
+    try {
+      const results = await runSettle(chainId)
+      const settled = results.filter(r => !r.result.startsWith('ERROR') && r.result !== 'DRY_RUN')
+      const skipped = results.filter(r => r.result.includes('no action') || r.result.includes('NO MIGRATION'))
+      const errors  = results.filter(r => r.result.startsWith('ERROR'))
+      console.log(`[cron] chain ${chainId}: ${settled.length} settled, ${skipped.length} skipped, ${errors.length} errors`)
+    } catch (err) {
+      console.error(`[cron] chain ${chainId} failed:`, err instanceof Error ? err.message : err)
+    }
+  }
+  console.log('[cron] Done.')
+}
+
+const ONE_HOUR = 60 * 60 * 1000
+setInterval(cronJob, ONE_HOUR)
