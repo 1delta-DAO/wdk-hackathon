@@ -39,11 +39,12 @@ export async function runAgentWithIntent (clients: AgentClients, intent: Lending
   ])
 
   const oneDeltaNeeded = new Set([
+    'get_user_positions',  // inspect existing deposits/borrows before optimizing
     'find_market',
     'convert_amount',
     'get_deposit_calldata',
     ...(intent.debtToken ? ['get_borrow_calldata'] : []),
-    'get_lender_ids', // agent may need this to resolve lender IDs
+    'get_lender_ids',      // agent may need this to resolve lender IDs
   ])
   const wdkNeeded = new Set(['getAddress', 'sendTransaction'])
 
