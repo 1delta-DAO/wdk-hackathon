@@ -2,9 +2,7 @@
 
 pragma solidity 0.8.34;
 
-import {MorphoSettlementCallback} from "./flash-loan/MorphoSettlementCallback.sol";
-import {MoolahSettlementCallback} from "./flash-loan/MoolahSettlementCallback.sol";
-import {MorphoFlashLoans} from "./flash-loan/Morpho.sol";
+import {SettlementExecutor} from "./SettlementExecutor.sol";
 import {EIP712OrderVerifier} from "./EIP712OrderVerifier.sol";
 import {SwapVerifier} from "./oracle/SwapVerifier.sol";
 import {HealthFactorChecker} from "./conditions/HealthFactorChecker.sol";
@@ -12,9 +10,12 @@ import {LenderIds} from "./lending/DeltaEnums.sol";
 import {SettlementForwarder} from "./SettlementForwarder.sol";
 
 /**
- * @title Settlement
- * @notice Concrete settlement contract with EIP-712 order verification, flash loan
- *         support, delta-validated lending actions, and oracle-verified DEX swaps.
+ * @title SettlementBase
+ * @notice Abstract settlement with EIP-712 order verification, oracle-verified
+ *         swaps, and post-settlement health factor checks.
+ *
+ *         Chain-specific subcontracts wire in the appropriate flash loan provider
+ *         and callback(s) by overriding `_flashLoan`.
  *
  * ═══════════════════════════════════════════════════════════════════════════════
  *  ORACLE-VERIFIED SWAPS
@@ -45,13 +46,6 @@ import {SettlementForwarder} from "./SettlementForwarder.sol";
  *  amountIn sentinels:
  *    0 — contract's full balance of assetIn (prevents dust from max withdrawals)
  *
- *  The conversions are matched in order: conversion 0 in settlementData
- *  is paired with swap 0 in fillerCalldata.  The assetIn/assetOut in both
- *  MUST match — the contract verifies this.
- *
- *  If fillerCalldata is empty, the intent is a no-op (same-asset settlement).
- *  If settlementData is empty (numConversions = 0), no swaps are allowed.
- *
  * ═══════════════════════════════════════════════════════════════════════════════
  *  SECURITY MODEL
  * ═══════════════════════════════════════════════════════════════════════════════
@@ -64,10 +58,8 @@ import {SettlementForwarder} from "./SettlementForwarder.sol";
  *     bad price beyond the signed slippage tolerance.
  *  4. The zero-sum delta check ensures everything balances at the end.
  */
-contract Settlement is
-    MorphoFlashLoans,
-    MorphoSettlementCallback,
-    MoolahSettlementCallback,
+abstract contract SettlementBase is
+    SettlementExecutor,
     EIP712OrderVerifier,
     SwapVerifier,
     HealthFactorChecker
@@ -84,13 +76,21 @@ contract Settlement is
         forwarder = new SettlementForwarder(address(this));
     }
 
-    function _morphoPool() internal pure override returns (address) {
-        return 0xBBBBBbbBBb9cC5e90e3b3Af64bdAF62C37EEFFCb;
-    }
+    // ── Flash loan hook (chain-specific) ──────────────────
 
-    function _moolahPool() internal pure override returns (address) {
-        return 0xf820fB4680712CD7263a0D3D024D5b5aEA82Fd70;
-    }
+    /**
+     * @notice Initiate a flash loan via the chain's provider.
+     * @param flashLoanAsset  Token to flash-borrow
+     * @param flashLoanAmount Amount to flash-borrow
+     * @param user            Original caller / position owner
+     * @param data            Provider-specific encoded data
+     */
+    function _flashLoan(
+        address flashLoanAsset,
+        uint256 flashLoanAmount,
+        address user,
+        bytes memory data
+    ) internal virtual;
 
     // ── External Entry Points ────────────────────────────
 
@@ -141,7 +141,7 @@ contract Settlement is
             executionData
         );
 
-        morphoFlashLoan(flashLoanAsset, flashLoanAmount, user, fullData);
+        _flashLoan(flashLoanAsset, flashLoanAmount, user, fullData);
     }
 
     // ── Order Verification ───────────────────────────────
@@ -168,41 +168,23 @@ contract Settlement is
 
     // ── Intent: Oracle-Verified Swaps ────────────────────
 
-    /**
-     * @notice Executes solver swaps via the isolated forwarder, verifies each
-     *         against the user-signed oracle + slippage, and updates deltas.
-     *
-     * @dev If fillerCalldata is empty → no-op (same-asset settlement).
-     *      Otherwise, loops through each conversion defined in settlementData:
-     *        1. Parse (assetIn, assetOut, oracle, swapTolerance) from settlementData
-     *        2. Parse (assetIn, assetOut, amountIn, target, calldata) from fillerCalldata
-     *        3. Verify assetIn/assetOut match between both
-     *        4. Transfer amountIn to forwarder
-     *        5. Execute swap via forwarder
-     *        6. Sweep assetOut back
-     *        7. Verify output against oracle + slippage
-     *        8. Update deltas: delta[assetIn] -= amountIn, delta[assetOut] += output
-     */
     function _executeIntent(
         address, /* callerAddress */
         bytes memory settlementData,
         bytes memory fillerCalldata,
         AssetDelta[] memory deltas,
         uint256 deltaCount
-    ) internal override returns (uint256 newDeltaCount) {
+    ) internal virtual override returns (uint256 newDeltaCount) {
         if (fillerCalldata.length == 0) return deltaCount;
 
         newDeltaCount = deltaCount;
 
-        // Parse numConversions from settlementData
         uint256 numConversions;
         assembly {
             numConversions := shr(248, mload(add(settlementData, 0x20)))
         }
 
-        // settlementData cursor: after the 1-byte numConversions header
         uint256 sdOffset = 1;
-        // fillerCalldata cursor
         uint256 fcOffset;
 
         for (uint256 i; i < numConversions;) {
@@ -214,12 +196,6 @@ contract Settlement is
         }
     }
 
-    /**
-     * @notice Execute one oracle-verified swap and update deltas.
-     * @dev Extracted to avoid stack-too-deep in the conversion loop.
-     * @return newDeltaCount Updated delta count.
-     * @return fcConsumed    Bytes consumed from fillerCalldata for this swap.
-     */
     function _executeSwap(
         bytes memory settlementData,
         uint256 sdOffset,
@@ -228,7 +204,6 @@ contract Settlement is
         AssetDelta[] memory deltas,
         uint256 deltaCount
     ) private returns (uint256 newDeltaCount, uint256 fcConsumed) {
-        // ── Parse user-signed conversion params (68 bytes) ──
         address sdAssetIn;
         address sdAssetOut;
         address oracle;
@@ -242,7 +217,6 @@ contract Settlement is
             swapTolerance := shr(192, mload(add(sd, 60)))
         }
 
-        // ── Parse solver-provided swap details ──
         address fcAssetIn;
         address fcAssetOut;
         uint256 amountIn;
@@ -258,11 +232,8 @@ contract Settlement is
             swapCalldataLen := and(0xffff, shr(240, mload(add(fc, 74))))
         }
 
-        // Verify asset pair matches user-signed config
         if (fcAssetIn != sdAssetIn || fcAssetOut != sdAssetOut) revert ConversionMismatch();
 
-        // ── Resolve balance sentinel ──
-        // amountIn = 0 → use contract's full balance of assetIn (prevents dust leaks)
         if (amountIn == 0) {
             assembly {
                 let ptr := mload(0x40)
@@ -274,7 +245,6 @@ contract Settlement is
                 }
                 amountIn := mload(ptr)
             }
-            // Nothing to swap — skip (delta unchanged)
             if (amountIn == 0) {
                 newDeltaCount = deltaCount;
                 fcConsumed = 76 + swapCalldataLen;
@@ -282,24 +252,15 @@ contract Settlement is
             }
         }
 
-        // ── Execute the swap ──
         uint256 amountOut = _forwardSwap(fcAssetIn, fcAssetOut, amountIn, target, fillerCalldata, fcOffset, swapCalldataLen);
-
-        // ── Oracle verification ──
         _verifySwapOutput(oracle, fcAssetIn, fcAssetOut, amountIn, amountOut, swapTolerance);
 
-        // ── Update deltas ──
         newDeltaCount = _updateDelta(deltas, deltaCount, fcAssetIn, -int256(amountIn), 0);
         newDeltaCount = _updateDelta(deltas, newDeltaCount, fcAssetOut, int256(amountOut), 0);
 
-        // 20 + 20 + 14 + 20 + 2 + swapCalldataLen = 76 + swapCalldataLen
         fcConsumed = 76 + swapCalldataLen;
     }
 
-    /**
-     * @notice Transfer tokens to forwarder, execute swap, sweep output back.
-     * @return amountOut The output amount received.
-     */
     function _forwardSwap(
         address assetIn,
         address assetOut,
@@ -311,7 +272,6 @@ contract Settlement is
     ) private returns (uint256 amountOut) {
         address payable fwd = payable(address(forwarder));
 
-        // Snapshot output balance
         uint256 balBefore;
         assembly {
             let ptr := mload(0x40)
@@ -324,7 +284,6 @@ contract Settlement is
             balBefore := mload(ptr)
         }
 
-        // Transfer input to forwarder
         assembly {
             let ptr := mload(0x40)
             mstore(ptr, 0xa9059cbb00000000000000000000000000000000000000000000000000000000)
@@ -336,7 +295,6 @@ contract Settlement is
             }
         }
 
-        // Build swap calldata and execute
         bytes memory swapCalldata = new bytes(swapCalldataLen);
         assembly {
             let src := add(add(fillerCalldata, 0x20), add(fcOffset, 76))
@@ -346,11 +304,8 @@ contract Settlement is
             }
         }
         SettlementForwarder(fwd).execute(target, swapCalldata);
-
-        // Sweep output back
         SettlementForwarder(fwd).sweep(assetOut);
 
-        // Measure output
         assembly {
             let ptr := mload(0x40)
             mstore(ptr, 0x70a0823100000000000000000000000000000000000000000000000000000000)
@@ -365,24 +320,10 @@ contract Settlement is
 
     // ── Post-Settlement Conditions ───────────────────────
 
-    /**
-     * @notice Verifies post-settlement conditions encoded in the tail of settlementData.
-     * @dev Format after conversion data:
-     *        [1: numConditions]
-     *        [per condition — variable size based on lenderId]:
-     *            Aave (id < 2000):   [2: lenderId][20: pool][14: minHF]         = 36 bytes
-     *            CompoundV3 (2000–2999): [2: lenderId][20: comet][2: assetBitmap][14: minHF] = 38 bytes
-     *            CompoundV2 (3000–3999): [2: lenderId][20: comptroller][14: minHF] = 36 bytes
-     *            Morpho (4000–4999): [2: lenderId][20: morpho][32: marketId][14: minHF] = 68 bytes
-     *            SiloV2 (5000–5999): [2: lenderId][20: silo][14: minHF]           = 36 bytes
-     *
-     *      If settlementData ends at the conversion section, no conditions are checked.
-     *      Routes by lenderId using LenderIds thresholds (same as lending operations).
-     */
     function _postSettlementCheck(
         address callerAddress,
         bytes memory settlementData
-    ) internal view override {
+    ) internal view virtual override {
         uint256 numConversions;
         assembly {
             numConversions := shr(248, mload(add(settlementData, 0x20)))
@@ -406,7 +347,6 @@ contract Settlement is
             }
 
             if (lenderId < LenderIds.UP_TO_AAVE_V2) {
-                // 36-byte Aave condition: [2: lenderId][20: pool][14: minHF]
                 address pool;
                 uint256 minHF;
                 assembly {
@@ -417,7 +357,6 @@ contract Settlement is
                 _checkAaveHealthFactor(pool, callerAddress, minHF);
                 cursor += 36;
             } else if (lenderId < LenderIds.UP_TO_COMPOUND_V3) {
-                // 38-byte Compound V3 condition: [2: lenderId][20: comet][2: assetBitmap][14: minHF]
                 address comet;
                 uint256 assetBitmap;
                 uint256 minHF;
@@ -430,7 +369,6 @@ contract Settlement is
                 _checkCompoundV3HealthFactor(comet, callerAddress, assetBitmap, minHF);
                 cursor += 38;
             } else if (lenderId < LenderIds.UP_TO_COMPOUND_V2) {
-                // 36-byte Compound V2 condition: [2: lenderId][20: comptroller][14: minHF]
                 address comptroller;
                 assembly {
                     let ptr := add(add(settlementData, 0x20), cursor)
@@ -439,7 +377,6 @@ contract Settlement is
                 _checkCompoundV2Solvency(comptroller, callerAddress);
                 cursor += 36;
             } else if (lenderId < LenderIds.UP_TO_MORPHO) {
-                // 68-byte Morpho condition: [2: lenderId][20: morpho][32: marketId][14: minHF]
                 address morpho;
                 bytes32 marketId;
                 uint256 minHF;
@@ -452,7 +389,6 @@ contract Settlement is
                 _checkMorphoHealthFactor(morpho, marketId, callerAddress, minHF);
                 cursor += 68;
             } else if (lenderId < LenderIds.UP_TO_SILO_V2) {
-                // 36-byte Silo V2 condition: [2: lenderId][20: silo][14: minHF]
                 address silo;
                 assembly {
                     let ptr := add(add(settlementData, 0x20), cursor)

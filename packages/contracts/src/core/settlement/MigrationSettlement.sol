@@ -30,6 +30,10 @@ import {EIP712OrderVerifier} from "./EIP712OrderVerifier.sol";
 contract MigrationSettlement is MorphoSettlementCallback, MorphoFlashLoans, AaveV3AprChecker, EIP712OrderVerifier {
     address private constant FLASH_LOAN_POOL = 0xBBBBBbbBBb9cC5e90e3b3Af64bdAF62C37EEFFCb;
 
+    function _morphoPool() internal pure override returns (address) {
+        return FLASH_LOAN_POOL;
+    }
+
     uint256 private constant INTENT_TYPE_AAVE_V3_MIGRATION = 1;
 
     /**
