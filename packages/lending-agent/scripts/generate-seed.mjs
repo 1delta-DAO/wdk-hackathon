@@ -1,4 +1,4 @@
-import { generateMnemonic } from '/home/caglavol/Repos/wdk-hackathon/node_modules/.pnpm/bip39@3.1.0/node_modules/bip39/src/index.js'
+import { generateMnemonic } from 'bip39'
 
 // 12-word mnemonic (128 bits of entropy)
 const mnemonic12 = generateMnemonic(128)
