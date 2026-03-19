@@ -1,9 +1,8 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import type { Tool } from '@modelcontextprotocol/sdk/types.js'
 import type { Tool as AnthropicTool } from '@anthropic-ai/sdk/resources/messages.js'
-import { ONEDELTA_MCP_URL, WDK_SERVER_PATH, RESULT_CHAR_LIMIT } from './config.js'
+import { ONEDELTA_MCP_URL, RESULT_CHAR_LIMIT } from './config.js'
 
 export type ToolRouter = (toolName: string, input: Record<string, unknown>) => Promise<string>
 
@@ -20,18 +19,32 @@ export async function connectOneDelta (): Promise<Client> {
 }
 
 export async function connectWdk (): Promise<Client> {
-  if (!process.env.WDK_SEED) {
-    throw new Error('WDK_SEED environment variable is required for the WDK MCP server')
+  const client = new Client({ name: 'lending-agent-wdk', version: '1.0.0' })
+
+  if (process.env.WDK_MCP_URL) {
+    // HTTP mode — used in Cloudflare Workers or when pointing at a remote WDK server
+    const transport = new StreamableHTTPClientTransport(new URL(process.env.WDK_MCP_URL))
+    await client.connect(transport)
+    return client
   }
+
+  // Stdio mode — local dev only. Dynamic import keeps child_process out of the CF Workers bundle.
+  if (!process.env.WDK_SEED) {
+    throw new Error('Either WDK_MCP_URL (HTTP) or WDK_SEED (stdio) is required')
+  }
+  const { StdioClientTransport } = await import('@modelcontextprotocol/sdk/client/stdio.js')
+  const { fileURLToPath } = await import('url')
+  const { dirname, join } = await import('path')
+  const wdkServerPath = join(dirname(fileURLToPath(import.meta.url)), '../../../wdk-mcp-toolkit/examples/basic/index.js')
+
   const transport = new StdioClientTransport({
     command: 'node',
-    args: [WDK_SERVER_PATH],
+    args: [wdkServerPath],
     env: Object.fromEntries(
       Object.entries({ ...process.env, WDK_SEED: process.env.WDK_SEED })
         .filter((entry): entry is [string, string] => entry[1] !== undefined)
     )
   })
-  const client = new Client({ name: 'lending-agent-wdk', version: '1.0.0' })
   await client.connect(transport)
   return client
 }
