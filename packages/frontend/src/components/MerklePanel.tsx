@@ -15,7 +15,7 @@ interface Props {
   chainId: number
   selectedLenders: LenderProtocol[]
   selectedTokenPerms: SelectedTokenPerms
-  onRootChange?: (root: Hex | null) => void
+  onRootChange?: (root: Hex | null, leaves?: GeneratedLeaf[]) => void
 }
 
 const OP_COLORS: Record<string, string> = {
@@ -86,8 +86,8 @@ export function MerklePanel({ chainId, selectedLenders, selectedTokenPerms, onRo
   }, [chainId, selectedLenders, selectedTokenPerms])
 
   useEffect(() => {
-    onRootChange?.(root ?? null)
-  }, [root, onRootChange])
+    onRootChange?.(root ?? null, leaves.length > 0 ? leaves : undefined)
+  }, [root, leaves, onRootChange])
 
   if (leaves.length === 0) {
     return (
