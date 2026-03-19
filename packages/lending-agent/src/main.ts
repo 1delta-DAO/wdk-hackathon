@@ -1,11 +1,11 @@
 import type Anthropic from '@anthropic-ai/sdk'
-import { TOKEN, AMOUNT, CHAIN_FILTER, DRY_RUN, SETTLEMENT_ADDRESS } from './config.js'
-import { connectOneDelta, connectWdk, callTool, toAnthropicTools, createRouter } from './mcp.js'
+import { CONTRACTS_BY_CHAIN } from './config.js'
+import { callTool, toAnthropicTools, createRouter } from './mcp.js'
 import type { LocalHandler } from './mcp.js'
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js'
-import { buildSystemPrompt, buildIntentSystemPrompt, buildSettlementSystemPrompt } from './prompt.js'
+import { buildSettlementSystemPrompt } from './prompt.js'
 import { runAgentLoop } from './agent.js'
-import { fetchOrder, describeLeaves } from './order.js'
+import { fetchOrder, fetchOpenOrders, markOrderFilled, describeLeaves } from './order.js'
 import type { MerkleLeaf } from './order.js'
 import { executeSettlement } from './settle.js'
 import type { Address } from 'viem'
@@ -13,158 +13,6 @@ import type { Address } from 'viem'
 export interface AgentClients {
   oneDeltaClient: Client
   wdkClient: Client
-}
-
-/**
- * Represents a user's signed lending intent — derived from the StoredOrder
- * in the order-backend. The agent uses this to constrain its market search.
- *
- * collateralToken / debtToken may be empty when derived from orderToIntent().
- * The agent resolves them from get_user_positions using the signer's address.
- */
-export interface LendingIntent {
-  /** EIP-712 signature from the user over this intent — validated onchain */
-  signature: string
-  /** Order ID in the backend — used to mark the order filled after execution */
-  orderId?: string
-  /** Chain to optimize the position on */
-  chainId: number
-  /**
-   * Token address the user is supplying as collateral.
-   * Empty string when derived from orderToIntent() — agent resolves via get_user_positions.
-   */
-  collateralToken: string
-  /**
-   * Token address the user wants to borrow. Optional — if absent, deposit-only.
-   * Empty string when derived from orderToIntent() — agent resolves via get_user_positions.
-   */
-  debtToken: string
-  /** 1delta lender ID strings the user permits — agent must not select outside this set */
-  allowedLenders: string[]
-  /**
-   * USD amount to deposit as collateral.
-   * Optional — if absent the agent resolves the amount from the current position size.
-   */
-  usdAmount?: string
-}
-
-export async function runAgentWithIntent (clients: AgentClients, intent: LendingIntent): Promise<string> {
-  const { oneDeltaClient, wdkClient } = clients
-
-  const [{ tools: oneDeltaTools }, { tools: wdkTools }] = await Promise.all([
-    oneDeltaClient.listTools(),
-    wdkClient.listTools(),
-  ])
-
-  const oneDeltaNeeded = new Set([
-    'get_user_positions',  // inspect existing deposits/borrows before optimizing
-    'find_market',
-    'convert_amount',
-    'get_deposit_calldata',
-    ...(intent.debtToken ? ['get_borrow_calldata'] : []),
-    'get_lender_ids',      // agent may need this to resolve lender IDs
-  ])
-  const wdkNeeded = new Set(['getAddress', 'sendTransaction'])
-
-  const filteredOneDelta = oneDeltaTools.filter(t => oneDeltaNeeded.has(t.name))
-  const filteredWdk = wdkTools.filter(t => wdkNeeded.has(t.name))
-
-  const toolClientMap = Object.fromEntries([
-    ...filteredOneDelta.map(t => [t.name, oneDeltaClient] as const),
-    ...filteredWdk.map(t => [t.name, wdkClient] as const),
-  ])
-
-  const allTools: Anthropic.Tool[] = [
-    ...toAnthropicTools(filteredOneDelta),
-    ...toAnthropicTools(filteredWdk),
-  ]
-
-  let walletAddress = ''
-  try {
-    walletAddress = await callTool(wdkClient, 'getAddress', { chain: 'ethereum' })
-  } catch (err) {
-    console.warn('Could not fetch wallet address:', err instanceof Error ? err.message : err)
-  }
-
-  const systemPrompt = buildIntentSystemPrompt(walletAddress, intent)
-  const userMessage = [
-    `Optimize a lending position on chain ${intent.chainId}.`,
-    `Collateral token: ${intent.collateralToken}`,
-    intent.debtToken ? `Debt token: ${intent.debtToken}` : null,
-    `Allowed lenders: ${intent.allowedLenders.join(', ')}`,
-  ].filter(Boolean).join('\n')
-
-  console.log(`\nIntent task:\n${userMessage}\n`)
-
-  const router = createRouter(toolClientMap)
-  const messages: Anthropic.MessageParam[] = [{ role: 'user', content: userMessage }]
-  const finalResponse = await runAgentLoop(router, systemPrompt, allTools, messages)
-
-  const resultText = finalResponse.content
-    .filter((b): b is Anthropic.TextBlock => b.type === 'text')
-    .map(b => b.text)
-    .join('')
-
-  console.log('\n=== Agent Result ===')
-  console.log(resultText)
-
-  return resultText
-}
-
-export async function runAgent (clients: AgentClients): Promise<string> {
-  const { oneDeltaClient, wdkClient } = clients
-
-  const [{ tools: oneDeltaTools }, { tools: wdkTools }] = await Promise.all([
-    oneDeltaClient.listTools(),
-    wdkClient.listTools(),
-  ])
-
-  console.log(`\n1delta tools (${oneDeltaTools.length}): ${oneDeltaTools.map(t => t.name).join(', ')}`)
-  console.log(`WDK tools    (${wdkTools.length}): ${wdkTools.map(t => t.name).join(', ')}`)
-
-  const ONEDELTA_TOOLS_NEEDED = new Set(['get_lending_markets', 'convert_amount', 'get_deposit_calldata'])
-  const WDK_TOOLS_NEEDED = new Set(['getAddress', 'sendTransaction'])
-
-  const filteredOneDelta = oneDeltaTools.filter(t => ONEDELTA_TOOLS_NEEDED.has(t.name))
-  const filteredWdk = wdkTools.filter(t => WDK_TOOLS_NEEDED.has(t.name))
-
-  const toolClientMap = Object.fromEntries([
-    ...filteredOneDelta.map(t => [t.name, oneDeltaClient] as const),
-    ...filteredWdk.map(t => [t.name, wdkClient] as const)
-  ])
-
-  const allTools: Anthropic.Tool[] = [
-    ...toAnthropicTools(filteredOneDelta),
-    ...toAnthropicTools(filteredWdk)
-  ]
-
-  let walletAddress = ''
-  try {
-    walletAddress = await callTool(wdkClient, 'getAddress', { chain: 'ethereum' })
-    console.log(`\nWallet address (ethereum): ${walletAddress}`)
-  } catch (err) {
-    console.warn('Could not fetch wallet address from WDK:', err instanceof Error ? err.message : err)
-  }
-
-  const systemPrompt = buildSystemPrompt(walletAddress)
-  const chainNote = CHAIN_FILTER ? ` on chain ${CHAIN_FILTER}` : ' across all supported chains'
-  const userMessage = `Find the best ${TOKEN} lending market${chainNote} and deposit ${AMOUNT} USD worth of ${TOKEN} using my wallet.`
-
-  console.log(`\nUser task: ${userMessage}\n`)
-
-  const router = createRouter(toolClientMap)
-  const messages: Anthropic.MessageParam[] = [{ role: 'user', content: userMessage }]
-  const finalResponse = await runAgentLoop(router, systemPrompt, allTools, messages)
-
-  const resultText = finalResponse.content
-    .filter((b): b is Anthropic.TextBlock => b.type === 'text')
-    .map(b => b.text)
-    .join('')
-
-  console.log('\n=== Agent Result ===')
-  console.log(resultText)
-
-  return resultText
 }
 
 /**
@@ -178,11 +26,10 @@ export async function runSettlementFlow(
   clients: AgentClients,
   orderId: string,
   chainId: number,
-  settlementAddress?: string,
 ): Promise<string> {
   const { oneDeltaClient, wdkClient } = clients
-  const settlement = (settlementAddress ?? SETTLEMENT_ADDRESS) as Address
-  if (!settlement) throw new Error('SETTLEMENT_ADDRESS is required')
+  const settlement = CONTRACTS_BY_CHAIN[chainId].settlement
+  if (!settlement) throw new Error('SETTLEMENT CONTRACT ADDRESS is required')
 
   // ── Fetch order ──────────────────────────────────────────
   console.log(`\nFetching order ${orderId}…`)
@@ -321,31 +168,43 @@ export async function runSettlementFlow(
     feeRecipient: walletAddress as Address || undefined,
   })
 
+  // Mark filled after successful on-chain submission
+  if (txHash !== 'DRY_RUN') {
+    await markOrderFilled(orderId, chainId)
+    console.log(`  Order ${orderId} marked as filled.`)
+  }
+
   return txHash
 }
 
-export async function main (): Promise<void> {
-  if (!process.env.ANTHROPIC_API_KEY) {
-    throw new Error('ANTHROPIC_API_KEY environment variable is required')
+/**
+ * Fetches all open orders for a chain and runs the settlement flow on each.
+ * Orders are processed sequentially to avoid nonce conflicts on the wallet.
+ * Failed orders are logged and skipped — processing continues.
+ */
+export async function runAllSettlements(
+  clients: AgentClients,
+  chainId: number,
+): Promise<{ orderId: string; result: string }[]> {
+  console.log(`\nFetching open orders for chain ${chainId}…`)
+  const orders = await fetchOpenOrders(chainId)
+  console.log(`  Found ${orders.length} open order(s).`)
+
+  const results: { orderId: string; result: string }[] = []
+
+  for (const order of orders) {
+    console.log(`\n─── Processing order ${order.id} ───`)
+    try {
+      const result = await runSettlementFlow(clients, order.id, chainId)
+      results.push({ orderId: order.id, result })
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      console.error(`  Error processing order ${order.id}: ${msg}`)
+      results.push({ orderId: order.id, result: `ERROR: ${msg}` })
+    }
   }
 
-  const model = process.env.MODEL ?? 'claude-opus-4-6'
-  console.log('=== 1delta × WDK Lending Agent ===')
-  console.log(`Token: ${TOKEN}  |  Amount: ${AMOUNT}  |  DryRun: ${DRY_RUN}  |  Model: ${model}`)
-  if (CHAIN_FILTER) console.log(`Chain filter: ${CHAIN_FILTER}`)
-  console.log()
-
-  console.log('Connecting to 1delta MCP…')
-  const oneDeltaClient = await connectOneDelta()
-  console.log('  connected.')
-
-  console.log('Connecting to WDK MCP…')
-  const wdkClient = await connectWdk()
-  console.log('  connected.')
-
-  try {
-    await runAgent({ oneDeltaClient, wdkClient })
-  } finally {
-    await Promise.allSettled([oneDeltaClient.close(), wdkClient.close()])
-  }
+  return results
 }
+
+

@@ -1,5 +1,5 @@
 /**
- * Order backend client and StoredOrder → LendingIntent decoder.
+ * Order backend client and StoredOrder.
  *
  * Decodes merkle leaves to extract:
  *   - Which lenders the user approved (numeric ID → 1delta string)
@@ -13,25 +13,7 @@
 
 import { getAddress } from 'viem'
 import type { Hex, Address } from 'viem'
-import { LenderIds, LenderOps } from '@1delta/settlement-sdk'
-import type { MorphoMarketParams } from '@1delta/settlement-sdk'
-import type { LendingIntent } from './main.js'
-
-interface AaveMarketInfo {
-  oneDeltaLenderId: string
-  tokenAddress: Address
-  pool: Address
-  aToken: Address
-  debtToken: Address
-}
-
-interface MorphoMarketInfo {
-  oneDeltaLenderId: string
-  tokenAddress: Address
-  morpho: Address
-  market: MorphoMarketParams
-}
-
+import { LenderIds } from '@1delta/settlement-sdk'
 
 // ─── Types mirrored from order-backend ───────────────────────────────────────
 
@@ -68,7 +50,7 @@ export interface StoredOrder {
  * Maps a numeric settlement lender ID back to the 1delta API lender string.
  * The numeric ID is a range lower-bound; we return the most common protocol name.
  */
-export function fromSettlementLenderId(numericId: number): string {
+function fromSettlementLenderId(numericId: number): string {
   if (numericId < LenderIds.UP_TO_AAVE_V3)     return 'AAVE_V3'     // 0–999
   if (numericId < LenderIds.UP_TO_AAVE_V2)     return 'AAVE_V2'     // 1000–1999
   if (numericId < LenderIds.UP_TO_COMPOUND_V3) return 'COMPOUND_V3' // 2000–2999
@@ -94,12 +76,12 @@ function addrAt(data: Hex, byteOffset: number): Address {
   return getAddress(`0x${data.slice(2 + byteOffset * 2, 2 + (byteOffset + 20) * 2)}`)
 }
 
-export interface DecodedAaveDeposit  { pool: Address }
-export interface DecodedAaveBorrow   { mode: number; pool: Address }
-export interface DecodedAaveRepay    { mode: number; debtToken: Address; pool: Address }
-export interface DecodedAaveWithdraw { aToken: Address; pool: Address }
+interface DecodedAaveDeposit  { pool: Address }
+interface DecodedAaveBorrow   { mode: number; pool: Address }
+interface DecodedAaveRepay    { mode: number; debtToken: Address; pool: Address }
+interface DecodedAaveWithdraw { aToken: Address; pool: Address }
 
-export interface DecodedMorphoAction {
+interface DecodedMorphoAction {
   loanToken: Address
   collateralToken: Address
   oracle: Address
@@ -110,12 +92,12 @@ export interface DecodedMorphoAction {
 }
 
 // DEPOSIT: [20: pool]
-export function decodeAaveDeposit(data: Hex): DecodedAaveDeposit {
+function decodeAaveDeposit(data: Hex): DecodedAaveDeposit {
   return { pool: addrAt(data, 0) }
 }
 
 // BORROW: [1: mode][20: pool]
-export function decodeAaveBorrow(data: Hex): DecodedAaveBorrow {
+function decodeAaveBorrow(data: Hex): DecodedAaveBorrow {
   const raw = data.slice(2)
   return {
     mode: parseInt(raw.slice(0, 2), 16),
@@ -124,7 +106,7 @@ export function decodeAaveBorrow(data: Hex): DecodedAaveBorrow {
 }
 
 // REPAY: [1: mode][20: debtToken][20: pool]
-export function decodeAaveRepay(data: Hex): DecodedAaveRepay {
+function decodeAaveRepay(data: Hex): DecodedAaveRepay {
   const raw = data.slice(2)
   return {
     mode:      parseInt(raw.slice(0, 2), 16),
@@ -134,7 +116,7 @@ export function decodeAaveRepay(data: Hex): DecodedAaveRepay {
 }
 
 // WITHDRAW: [20: aToken][20: pool]
-export function decodeAaveWithdraw(data: Hex): DecodedAaveWithdraw {
+function decodeAaveWithdraw(data: Hex): DecodedAaveWithdraw {
   return {
     aToken: addrAt(data, 0),
     pool:   addrAt(data, 20),
@@ -142,7 +124,7 @@ export function decodeAaveWithdraw(data: Hex): DecodedAaveWithdraw {
 }
 
 // All Morpho ops: [20: loan][20: coll][20: oracle][20: irm][16: lltv][1: flags][20: morpho]
-export function decodeMorphoAction(data: Hex): DecodedMorphoAction {
+function decodeMorphoAction(data: Hex): DecodedMorphoAction {
   const raw = data.slice(2)
   return {
     loanToken:       getAddress(`0x${raw.slice(0,   40)}`),
@@ -152,153 +134,6 @@ export function decodeMorphoAction(data: Hex): DecodedMorphoAction {
     lltv:            BigInt(`0x${raw.slice(160, 192)}`),
     flags:           parseInt(raw.slice(192, 194), 16),
     morpho:          getAddress(`0x${raw.slice(194, 234)}`),
-  }
-}
-
-// ─── Decode leaves → MarketInfo ───────────────────────────────────────────────
-
-/**
- * Reconstructs source and destination MarketInfo from the order's merkle leaves.
- *
- * Convention: REPAY+WITHDRAW leaves = source, DEPOSIT+BORROW leaves = dest.
- * Returns null for either side if the corresponding leaves are absent (e.g.
- * deposit-only orders have no source, borrow-only have no dest collateral).
- */
-export function decodeMarketInfoFromLeaves(leaves: MerkleLeaf[]): {
-  source: AaveMarketInfo | MorphoMarketInfo | null
-  dest: AaveMarketInfo | MorphoMarketInfo | null
-} {
-  const repayLeaf    = leaves.find(l => l.op === LenderOps.REPAY)
-  const withdrawLeaf = leaves.find(l => l.op === LenderOps.WITHDRAW)
-  const depositLeaf  = leaves.find(l => l.op === LenderOps.DEPOSIT)
-  const borrowLeaf   = leaves.find(l => l.op === LenderOps.BORROW)
-
-  function buildAaveMarket(
-    repay: MerkleLeaf | undefined,
-    withdraw: MerkleLeaf | undefined,
-    deposit: MerkleLeaf | undefined,
-    lenderLeaf: MerkleLeaf,
-  ): AaveMarketInfo {
-    const repayDecoded    = repay    ? decodeAaveRepay(repay.data)       : null
-    const withdrawDecoded = withdraw ? decodeAaveWithdraw(withdraw.data) : null
-    const depositDecoded  = deposit  ? decodeAaveDeposit(deposit.data)   : null
-
-    const zero = '0x0000000000000000000000000000000000000000' as Address
-    const pool      = (repayDecoded?.pool ?? withdrawDecoded?.pool ?? depositDecoded?.pool ?? zero) as Address
-    const aToken    = (withdrawDecoded?.aToken ?? zero) as Address
-    const debtToken = (repayDecoded?.debtToken ?? zero) as Address
-
-    return {
-      oneDeltaLenderId: fromSettlementLenderId(lenderLeaf.lender),
-      tokenAddress: debtToken, // underlying resolved later via get_user_positions
-      pool,
-      aToken,
-      debtToken,
-    }
-  }
-
-  function buildMorphoMarket(leaf: MerkleLeaf): MorphoMarketInfo {
-    const decoded = decodeMorphoAction(leaf.data)
-    const market: MorphoMarketParams = {
-      loanToken:       decoded.loanToken,
-      collateralToken: decoded.collateralToken,
-      oracle:          decoded.oracle,
-      irm:             decoded.irm,
-      lltv:            decoded.lltv,
-    }
-    return {
-      oneDeltaLenderId: fromSettlementLenderId(leaf.lender),
-      tokenAddress: decoded.loanToken,
-      morpho: decoded.morpho,
-      market,
-    }
-  }
-
-  // Source = where the existing position lives (repay + withdraw)
-  let source: AaveMarketInfo | MorphoMarketInfo | null = null
-  if (repayLeaf || withdrawLeaf) {
-    const anchor = repayLeaf ?? withdrawLeaf!
-    if (isAaveLender(anchor.lender)) {
-      source = buildAaveMarket(repayLeaf, withdrawLeaf, undefined, anchor)
-    } else if (isMorphoLender(anchor.lender)) {
-      source = buildMorphoMarket(anchor)
-    }
-  }
-
-  // Dest = where the position should move (deposit + borrow)
-  let dest: AaveMarketInfo | MorphoMarketInfo | null = null
-  if (depositLeaf || borrowLeaf) {
-    const anchor = depositLeaf ?? borrowLeaf!
-    if (isAaveLender(anchor.lender)) {
-      dest = buildAaveMarket(undefined, undefined, depositLeaf, anchor)
-    } else if (isMorphoLender(anchor.lender)) {
-      dest = buildMorphoMarket(anchor)
-    }
-  }
-
-  return { source, dest }
-}
-
-// ─── StoredOrder → LendingIntent ─────────────────────────────────────────────
-
-/**
- * Derives a LendingIntent from a StoredOrder.
- *
- * Allowed lenders: unique numeric lender IDs across all leaves → 1delta strings.
- *
- * Assets:
- *   - Morpho leaves encode underlyings directly (loanToken = debt, collateralToken = collateral).
- *   - Aave leaves encode protocol tokens (aToken, variableDebtToken), not underlyings.
- *     For Aave we populate the protocol token addresses and rely on the agent to resolve
- *     the actual underlying via get_user_positions (which returns underlying asset info).
- *
- * Source = REPAY + WITHDRAW leaves (existing position).
- * Dest   = DEPOSIT + BORROW leaves (target position — may differ from source lender).
- * The collateral/debt assets are read from the SOURCE side since that's what the
- * agent needs to find and optimize.
- */
-export function orderToIntent(order: StoredOrder): LendingIntent {
-  const leaves = order.order.leaves
-
-  const uniqueNumericLenders = [...new Set(leaves.map(l => l.lender))]
-  const allowedLenders = uniqueNumericLenders.map(fromSettlementLenderId)
-
-  const repayLeaf    = leaves.find(l => l.op === LenderOps.REPAY)
-  const withdrawLeaf = leaves.find(l => l.op === LenderOps.WITHDRAW)
-  const depositLeaf  = leaves.find(l => l.op === LenderOps.DEPOSIT)
-  const borrowLeaf   = leaves.find(l => l.op === LenderOps.BORROW)
-
-  // Use source leaves first; fall back to dest leaves for deposit-only orders
-  const collateralLeaf = withdrawLeaf ?? depositLeaf
-  const debtLeaf       = repayLeaf    ?? borrowLeaf
-
-  let collateralToken = ''
-  if (collateralLeaf) {
-    if (isMorphoLender(collateralLeaf.lender)) {
-      collateralToken = decodeMorphoAction(collateralLeaf.data).collateralToken
-    } else if (isAaveLender(collateralLeaf.lender) && collateralLeaf.op === LenderOps.WITHDRAW) {
-      // aToken address — agent resolves underlying via get_user_positions
-      collateralToken = decodeAaveWithdraw(collateralLeaf.data).aToken
-    }
-  }
-
-  let debtToken = ''
-  if (debtLeaf) {
-    if (isMorphoLender(debtLeaf.lender)) {
-      debtToken = decodeMorphoAction(debtLeaf.data).loanToken
-    } else if (isAaveLender(debtLeaf.lender) && debtLeaf.op === LenderOps.REPAY) {
-      // variableDebtToken address — agent resolves underlying via get_user_positions
-      debtToken = decodeAaveRepay(debtLeaf.data).debtToken
-    }
-  }
-
-  return {
-    signature: order.signature,
-    orderId:   order.id,
-    chainId:   order.order.chainId,
-    collateralToken,
-    debtToken,
-    allowedLenders,
   }
 }
 
