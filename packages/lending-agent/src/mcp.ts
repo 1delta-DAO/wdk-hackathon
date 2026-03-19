@@ -91,8 +91,14 @@ export async function loadDocs (client: Client): Promise<string> {
 
 // ── Router ────────────────────────────────────────────────────────────────────
 
-export function createRouter (toolClientMap: Record<string, Client>): ToolRouter {
+export type LocalHandler = (input: Record<string, unknown>) => Promise<string>
+
+export function createRouter (
+  toolClientMap: Record<string, Client>,
+  localHandlers: Record<string, LocalHandler> = {},
+): ToolRouter {
   return async function route (toolName: string, input: Record<string, unknown>): Promise<string> {
+    if (localHandlers[toolName]) return localHandlers[toolName](input)
     const client = toolClientMap[toolName]
     if (!client) throw new Error(`No MCP client registered for tool: ${toolName}`)
     return callTool(client, toolName, input)
