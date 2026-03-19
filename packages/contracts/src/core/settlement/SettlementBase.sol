@@ -322,7 +322,8 @@ abstract contract SettlementBase is
 
     function _postSettlementCheck(
         address callerAddress,
-        bytes memory settlementData
+        bytes memory settlementData,
+        uint256 riskyLenderMask
     ) internal view virtual override {
         uint256 numConversions;
         assembly {
@@ -346,55 +347,68 @@ abstract contract SettlementBase is
                 lenderId := and(0xffff, shr(240, mload(add(add(settlementData, 0x20), cursor))))
             }
 
+            // Bitmap: bit 0 = Aave (<2000), bit 1 = CompV3 (<3000),
+            //         bit 2 = CompV2 (<4000), bit 3 = Morpho (<5000), bit 4 = Silo (<6000)
+            // Only run the expensive health check if this lender bucket had a risky op.
             if (lenderId < LenderIds.UP_TO_AAVE_V2) {
-                address pool;
-                uint256 minHF;
-                assembly {
-                    let ptr := add(add(settlementData, 0x20), cursor)
-                    pool := shr(96, mload(add(ptr, 2)))
-                    minHF := shr(144, mload(add(ptr, 22)))
+                if (riskyLenderMask & 1 != 0) {
+                    address pool;
+                    uint256 minHF;
+                    assembly {
+                        let ptr := add(add(settlementData, 0x20), cursor)
+                        pool := shr(96, mload(add(ptr, 2)))
+                        minHF := shr(144, mload(add(ptr, 22)))
+                    }
+                    _checkAaveHealthFactor(pool, callerAddress, minHF);
                 }
-                _checkAaveHealthFactor(pool, callerAddress, minHF);
                 cursor += 36;
             } else if (lenderId < LenderIds.UP_TO_COMPOUND_V3) {
-                address comet;
-                uint256 assetBitmap;
-                uint256 minHF;
-                assembly {
-                    let ptr := add(add(settlementData, 0x20), cursor)
-                    comet := shr(96, mload(add(ptr, 2)))
-                    assetBitmap := and(0xffff, shr(240, mload(add(ptr, 22))))
-                    minHF := shr(144, mload(add(ptr, 24)))
+                if (riskyLenderMask & 2 != 0) {
+                    address comet;
+                    uint256 assetBitmap;
+                    uint256 minHF;
+                    assembly {
+                        let ptr := add(add(settlementData, 0x20), cursor)
+                        comet := shr(96, mload(add(ptr, 2)))
+                        assetBitmap := and(0xffff, shr(240, mload(add(ptr, 22))))
+                        minHF := shr(144, mload(add(ptr, 24)))
+                    }
+                    _checkCompoundV3HealthFactor(comet, callerAddress, assetBitmap, minHF);
                 }
-                _checkCompoundV3HealthFactor(comet, callerAddress, assetBitmap, minHF);
                 cursor += 38;
             } else if (lenderId < LenderIds.UP_TO_COMPOUND_V2) {
-                address comptroller;
-                assembly {
-                    let ptr := add(add(settlementData, 0x20), cursor)
-                    comptroller := shr(96, mload(add(ptr, 2)))
+                if (riskyLenderMask & 4 != 0) {
+                    address comptroller;
+                    assembly {
+                        let ptr := add(add(settlementData, 0x20), cursor)
+                        comptroller := shr(96, mload(add(ptr, 2)))
+                    }
+                    _checkCompoundV2Solvency(comptroller, callerAddress);
                 }
-                _checkCompoundV2Solvency(comptroller, callerAddress);
                 cursor += 36;
             } else if (lenderId < LenderIds.UP_TO_MORPHO) {
-                address morpho;
-                bytes32 marketId;
-                uint256 minHF;
-                assembly {
-                    let ptr := add(add(settlementData, 0x20), cursor)
-                    morpho := shr(96, mload(add(ptr, 2)))
-                    marketId := mload(add(ptr, 22))
-                    minHF := shr(144, mload(add(ptr, 54)))
+                if (riskyLenderMask & 8 != 0) {
+                    address morpho;
+                    bytes32 marketId;
+                    uint256 minHF;
+                    assembly {
+                        let ptr := add(add(settlementData, 0x20), cursor)
+                        morpho := shr(96, mload(add(ptr, 2)))
+                        marketId := mload(add(ptr, 22))
+                        minHF := shr(144, mload(add(ptr, 54)))
+                    }
+                    _checkMorphoHealthFactor(morpho, marketId, callerAddress, minHF);
                 }
-                _checkMorphoHealthFactor(morpho, marketId, callerAddress, minHF);
                 cursor += 68;
             } else if (lenderId < LenderIds.UP_TO_SILO_V2) {
-                address silo;
-                assembly {
-                    let ptr := add(add(settlementData, 0x20), cursor)
-                    silo := shr(96, mload(add(ptr, 2)))
+                if (riskyLenderMask & 16 != 0) {
+                    address silo;
+                    assembly {
+                        let ptr := add(add(settlementData, 0x20), cursor)
+                        silo := shr(96, mload(add(ptr, 2)))
+                    }
+                    _checkSiloV2Solvency(silo, callerAddress);
                 }
-                _checkSiloV2Solvency(silo, callerAddress);
                 cursor += 36;
             } else {
                 revert UnsupportedConditionLender();

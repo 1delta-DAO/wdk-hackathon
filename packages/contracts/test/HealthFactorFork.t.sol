@@ -605,17 +605,21 @@ contract HealthFactorForkTest is Test {
         console.log("Compound V3 HF pass test succeeded");
     }
 
-    function test_compoundV3HealthFactor_reverts() public {
+    /// @dev Compound V3 condition with unreasonable minHF but only Aave ops —
+    ///      the Compound V3 check is skipped because no risky ops touched that lender.
+    function test_compoundV3HealthFactor_skippedWhenNoRiskyOps() public {
         if (address(settlement) == address(0)) return;
 
         _setupCompoundV3Position(COMET_WBTC_COLLATERAL, COMET_USDC_BORROW);
 
+        // minHF = 50 would normally fail, but Compound V3 check is skipped (only Aave ops)
         SettlementParams memory p = _buildCompoundV3ConditionSettlement(uint112(50e18));
         uint48 deadline = uint48(block.timestamp + 1 hours);
         bytes memory sig = _signOrder(userPk, p.merkleRoot, deadline, p.settlementPayload);
 
-        vm.expectRevert(HealthFactorChecker.HealthFactorTooLow.selector);
+        // Does NOT revert — Compound V3 condition skipped because no CompV3 borrow/withdraw
         settlement.settle(0, deadline, sig, p.orderData, p.executionData, p.fillerCalldata);
+        console.log("Compound V3 HF check correctly skipped: no risky CompV3 ops");
     }
 
     function test_compoundV3HealthFactor_noDebt() public {
@@ -743,18 +747,22 @@ contract HealthFactorForkTest is Test {
     //  Test 6: Morpho HF reverts — unreasonably high minHF
     // ═══════════════════════════════════════════════════════════
 
-    function test_morphoHealthFactor_reverts() public {
+    /// @dev Morpho condition with unreasonable minHF but only Aave ops —
+    ///      the Morpho check is skipped because no risky ops touched that lender.
+    function test_morphoHealthFactor_skippedWhenNoRiskyOps() public {
         if (address(settlement) == address(0)) return;
 
         _setupMorphoPosition(MORPHO_CBBTC_COLLATERAL, MORPHO_USDC_BORROW);
 
+        // minHF = 50 would normally fail, but Morpho check is skipped (only Aave ops)
         SettlementParams memory p = _buildMorphoConditionSettlement(uint112(50e18));
 
         uint48 deadline = uint48(block.timestamp + 1 hours);
         bytes memory sig = _signOrder(userPk, p.merkleRoot, deadline, p.settlementPayload);
 
-        vm.expectRevert(HealthFactorChecker.HealthFactorTooLow.selector);
+        // Does NOT revert — Morpho condition skipped because no Morpho borrow/withdraw
         settlement.settle(0, deadline, sig, p.orderData, p.executionData, p.fillerCalldata);
+        console.log("Morpho HF check correctly skipped: no risky Morpho ops");
     }
 
     // ═══════════════════════════════════════════════════════════
