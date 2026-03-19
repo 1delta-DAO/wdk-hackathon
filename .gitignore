@@ -7,6 +7,7 @@ build/
 *.log
 .DS_Store
 .tmp
+wrangler.toml
 
 # Solidity / Foundry / Hardhat
 cache/

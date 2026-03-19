@@ -1,0 +1,32 @@
+name = "lending-agent"
+main = "worker.ts"
+compatibility_date = "2025-01-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Cron trigger — run settlement loop every hour
+[triggers]
+crons = ["0 * * * *"]
+
+[vars]
+# Anthropic API key for Claude Opus 4.6
+ANTHROPIC_API_KEY=""
+MODEL = "claude-opus-4-6"
+
+# BIP-39 seed phrase for the WDK wallet (12 or 24 words)
+# WARNING: this controls a live wallet — never commit a real seed
+WDK_SEED=""
+
+# 1delta API key — raises rate limits (get one at https://auth.1delta.io)
+ONEDELTA_API_KEY=""
+
+# Set to "true" to skip actual transaction submission and just print calldata
+DRY_RUN=true
+
+# Bearer token to protect the /settle/* endpoints
+API_SECRET=""
+
+# Order backend
+ORDER_BACKEND_URL=""
+
+# Chains to run the settlement job on
+CRON_CHAIN_IDS="42161"
