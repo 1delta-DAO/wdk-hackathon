@@ -81,6 +81,22 @@ export function buildMerkleTree(leaves: Hex[]): {
   return { root, proofs }
 }
 
+/**
+ * Verify a merkle proof: recompute root from leaf and proof siblings.
+ * Uses the same pairHash (sorted-pair) as on-chain verification.
+ */
+export function verifyMerkleProof(
+  leaf: Hex,
+  proof: readonly Hex[],
+  root: Hex,
+): boolean {
+  let cur = leaf
+  for (const sib of proof) {
+    cur = pairHash(cur, sib)
+  }
+  return cur.toLowerCase() === root.toLowerCase()
+}
+
 function nextPow2(n: number): number {
   let p = 1
   while (p < n) p <<= 1

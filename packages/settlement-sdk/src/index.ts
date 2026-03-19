@@ -3,7 +3,15 @@ export { LenderOps, LenderIds, FEE_DENOMINATOR, AmountSentinel, SwapAmountSentin
 export type { Address } from './constants.js'
 
 // Merkle tree & order definition
-export { buildLeaf, pairHash, buildMerkleTree, defineOrder, AaveData, MorphoData } from './merkle.js'
+export {
+  buildLeaf,
+  pairHash,
+  buildMerkleTree,
+  defineOrder,
+  verifyMerkleProof,
+  AaveData,
+  MorphoData,
+} from './merkle.js'
 export type { LeafParams, ActionDef, MorphoMarketParams } from './merkle.js'
 
 // Calldata encoding
@@ -13,15 +21,32 @@ export {
   encodeOrderData,
   encodeExecutionData,
   encodeFillerCalldata,
+  encodeAaveHealthCondition,
+  encodeMorphoHealthCondition,
+  encodeCompoundV3HealthCondition,
+  encodeSimplePoolHealthCondition,
 } from './calldata.js'
 export type {
   Conversion,
   AaveCondition,
   MorphoCondition,
+  CompoundV3Condition,
+  SimplePoolCondition,
   Condition,
   ActionCalldata,
   SwapParams,
 } from './calldata.js'
+
+// Batches (health-factor condition expansion)
+export {
+  expandStableBatchToConditions,
+  batchesById,
+} from './batches.js'
+export type {
+  AaveStableBatchMember,
+  MorphoStableBatchMember,
+  StableHealthBatch,
+} from './batches.js'
 
 // High-level settlement builders (namespace)
 export { Settlement } from './settlement.js'

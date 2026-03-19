@@ -67,7 +67,27 @@ describe.skipIf(!canRun)(
         usdAmount: '10',
       }
 
+      // Spy on 1delta tool calls to verify the agent inspects positions before optimizing
+      const calledOneDeltaTools: string[] = []
+      const originalCallTool = oneDeltaClient.callTool.bind(oneDeltaClient)
+      oneDeltaClient.callTool = async (params, ...rest) => {
+        calledOneDeltaTools.push(params.name)
+        return originalCallTool(params, ...rest)
+      }
+
       const result = await runAgentWithIntent({ oneDeltaClient, wdkClient }, intent)
+
+      // Agent must have fetched existing positions before doing anything else
+      expect(
+        calledOneDeltaTools.includes('get_user_positions'),
+        'agent must call get_user_positions to inspect existing positions'
+      ).toBe(true)
+
+      // get_user_positions must be the first 1delta tool called
+      expect(
+        calledOneDeltaTools[0],
+        'get_user_positions must be called before market discovery'
+      ).toBe('get_user_positions')
 
       // Agent must produce a non-empty response
       expect(result.length).toBeGreaterThan(0)
