@@ -31,18 +31,22 @@ OPTIMIZATION GOAL:
 ${optimizationGoal}
 
 WORKFLOW:
-1. For each allowed lender call find_market with chainId="${intent.chainId}", tokenAddress=<collateralToken>, lender=<lenderId>.
-${hasDebt ? `2. For each allowed lender call find_market with chainId="${intent.chainId}", tokenAddress=<debtToken>, lender=<lenderId>.
-3. Pair by lender, compute depositRate − borrowRate, pick the best lender.
-4. Call convert_amount for the collateral amount (usdAmount="${intent.usdAmount}", use priceUsd from the market).
-5. Call get_deposit_calldata with the chosen collateral marketUid, amount=baseUnits, operator=walletAddress.
-6. Call get_borrow_calldata with the chosen debt marketUid, amount=baseUnits, operator=walletAddress.
-7. Report chosen lender, collateral depositRate, debt borrowRate, net yield, and the calldata.` : `2. Pick the lender with the highest depositRate.
-3. Call convert_amount (usdAmount="${intent.usdAmount}", use priceUsd from the market).
-4. Call get_deposit_calldata with marketUid, amount=baseUnits, operator=walletAddress.
-5. Report chosen lender, depositRate, and the calldata.`}
+1. Call get_user_positions with account=walletAddress, chains="${intent.chainId}", lenders=<allowedLenders comma-separated>.
+   This reveals the user's existing deposits and borrows. Use it to understand what is already open
+   so you can decide whether to open a new position or migrate/top-up an existing one.
+2. For each allowed lender call find_market with chainId="${intent.chainId}", tokenAddress=<collateralToken>, lender=<lenderId>.
+${hasDebt ? `3. For each allowed lender call find_market with chainId="${intent.chainId}", tokenAddress=<debtToken>, lender=<lenderId>.
+4. Pair results by lender, compute depositRate − borrowRate, pick the best lender.
+5. Call convert_amount for the collateral amount (usdAmount="${intent.usdAmount}", use priceUsd from the market).
+6. Call get_deposit_calldata with the chosen collateral marketUid, amount=baseUnits, operator=walletAddress.
+7. Call get_borrow_calldata with the chosen debt marketUid, amount=baseUnits, operator=walletAddress.
+8. Report: current positions (if any), chosen lender, collateral depositRate, debt borrowRate, net yield, and calldata.` : `3. Pick the lender with the highest depositRate.
+4. Call convert_amount (usdAmount="${intent.usdAmount}", use priceUsd from the market).
+5. Call get_deposit_calldata with marketUid, amount=baseUnits, operator=walletAddress.
+6. Report: current positions (if any), chosen lender, depositRate, and calldata.`}
 
 RULES:
+- Always fetch existing positions first — the user may already have a deposit that should be migrated.
 - find_market lender field uses exact protocol IDs (e.g. AAVE_V3, COMPOUND_V3). If unsure, call get_lender_ids first.
 - convert_amount result field is "baseUnits" — always use this as the amount in calldata calls.
 - get_deposit_calldata uses "operator" (not "onBehalfOf") for the wallet address.
