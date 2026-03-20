@@ -1,4 +1,5 @@
 import type { Address } from 'viem'
+import { Check } from 'react-feather'
 import type { LenderProtocol } from '../data/lenders'
 import {
   PERMISSION_DEFS,
@@ -30,7 +31,6 @@ export interface PermissionRow {
   chainId: number
 }
 
-/** Build the flat list of all permission rows to sign */
 export function buildPermissionRows(
   chainId: number,
   selectedLenders: LenderProtocol[],
@@ -44,78 +44,49 @@ export function buildPermissionRows(
       const allPerms = getAaveTokenPermissions(lender.id, chainId)
       const selectedKeys = selectedTokenPerms[lender.id]
       if (!selectedKeys) continue
-
       for (const perm of allPerms) {
         const key = `${perm.tokenType}:${perm.tokenAddress}`
         if (!selectedKeys.has(key)) continue
-
         const shortAddr = `${perm.underlying.slice(0, 6)}...${perm.underlying.slice(-4)}`
         const typeLabel = perm.tokenType === 'aToken' ? 'Permit' : 'Delegation'
         rows.push({
-          key: `${lender.id}:${key}`,
-          label: `${lender.label} - ${typeLabel} (${shortAddr})`,
-          description: perm.tokenType === 'aToken'
-            ? 'ERC-2612 permit for collateral aToken'
-            : 'Credit delegation for variable debt token',
-          targetAddress: perm.tokenAddress,
-          kind: perm.kind,
-          chainId,
+          key: `${lender.id}:${key}`, label: `${lender.label} ${typeLabel} (${shortAddr})`,
+          description: perm.tokenType === 'aToken' ? 'ERC-2612 permit' : 'Credit delegation',
+          targetAddress: perm.tokenAddress, kind: perm.kind, chainId,
         })
       }
     } else if (lender.family === 'COMPOUND_V3') {
       const target = COMPOUND_V3_POOLS[cid]?.[lender.id]
       if (!target) continue
       rows.push({
-        key: `${lender.id}:COMPOUND_V3_ALLOW`,
-        label: `${lender.label} - Manager Auth`,
+        key: `${lender.id}:COMPOUND_V3_ALLOW`, label: `${lender.label} Auth`,
         description: PERMISSION_DEFS.COMPOUND_V3_ALLOW.description,
-        targetAddress: target,
-        kind: 'COMPOUND_V3_ALLOW',
-        chainId,
+        targetAddress: target, kind: 'COMPOUND_V3_ALLOW', chainId,
       })
     } else if (lender.family === 'MORPHO_BLUE') {
       const target = MORPHO_BLUE_ADDRESSES[cid]
       if (!target) continue
       rows.push({
-        key: `MORPHO_BLUE:MORPHO_AUTHORIZATION`,
-        label: 'Morpho Blue - Authorization',
+        key: `MORPHO_BLUE:MORPHO_AUTHORIZATION`, label: 'Morpho Auth',
         description: PERMISSION_DEFS.MORPHO_AUTHORIZATION.description,
-        targetAddress: target,
-        kind: 'MORPHO_AUTHORIZATION',
-        chainId,
+        targetAddress: target, kind: 'MORPHO_AUTHORIZATION', chainId,
       })
     }
   }
-
   return rows
 }
 
 export function PermissionPanel({
-  chainId,
-  selectedLenders,
-  selectedTokenPerms,
-  signedPermissions,
-  signing,
-  error,
-  onSign,
-  onSignAll,
+  chainId, selectedLenders, selectedTokenPerms, signedPermissions,
+  signing, error, onSign, onSignAll,
 }: Props) {
   const rows = buildPermissionRows(chainId, selectedLenders, selectedTokenPerms)
 
   if (selectedLenders.length === 0) {
-    return (
-      <div className="text-base-content/40 text-sm py-8 text-center">
-        Select lenders to see required permissions
-      </div>
-    )
+    return <div className="text-base-content/40 text-xs py-3 text-center">Select lenders first</div>
   }
-
   if (rows.length === 0) {
-    return (
-      <div className="text-base-content/40 text-sm py-8 text-center">
-        Select tokens within each Aave protocol to build permissions
-      </div>
-    )
+    return <div className="text-base-content/40 text-xs py-3 text-center">Select tokens to build permissions</div>
   }
 
   const signedKeys = new Set(signedPermissions.map(s => s.request.label))
@@ -123,80 +94,44 @@ export function PermissionPanel({
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-2">
-        <div>
-          <h2 className="text-lg font-bold">Permissions</h2>
-          <p className="text-xs text-base-content/40">{signedCount}/{rows.length} signed</p>
-        </div>
-        {rows.length > 0 && signedCount < rows.length && (
-          <button
-            onClick={onSignAll}
-            disabled={!!signing}
-            className="btn btn-sm btn-primary"
-          >
-            Sign All
-          </button>
+      <div className="flex items-center justify-between mb-1.5">
+        <span className="text-[11px] text-base-content/40">{signedCount}/{rows.length} signed</span>
+        {signedCount < rows.length && (
+          <button onClick={onSignAll} disabled={!!signing} className="btn btn-xs btn-primary">Sign All</button>
         )}
       </div>
 
-      {error && (
-        <div className="alert alert-error alert-sm mb-3">
-          <span className="text-xs">{error}</span>
-        </div>
-      )}
+      {error && <div className="alert alert-error py-1 mb-1.5 text-[11px]">{error}</div>}
 
-      <div className="space-y-1 max-h-[60vh] overflow-y-auto">
+      <div className="space-y-0.5 max-h-56 overflow-y-auto">
         {rows.map((row) => {
           const signed = signedKeys.has(row.key)
           const isSigning = signing === row.key
-
           return (
-            <div
-              key={row.key}
-              className={`flex items-center justify-between gap-2 px-3 py-2 rounded-lg border transition-all ${
-                signed
-                  ? 'border-success/30 bg-success/5'
-                  : 'border-base-300 bg-base-200'
-              }`}
-            >
+            <div key={row.key}
+              className={`flex items-center justify-between gap-1.5 px-2 py-1 rounded text-xs transition-all ${
+                signed ? 'bg-success/5 border border-success/20' : 'bg-base-300/50'
+              }`}>
               <div className="min-w-0">
                 <div className="text-xs font-medium truncate">{row.label}</div>
-                <div className="text-[10px] text-base-content/40 mt-0.5">{row.description}</div>
+                <div className="text-[10px] text-base-content/30">{row.description}</div>
               </div>
-              <div className="shrink-0">
-                {signed ? (
-                  <span className="badge badge-success badge-xs gap-1">
-                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                    </svg>
-                    Signed
-                  </span>
-                ) : (
-                  <button
-                    onClick={() => onSign({
-                      kind: row.kind,
-                      label: row.key,
-                      targetAddress: row.targetAddress,
-                      chainId: row.chainId,
-                    })}
-                    disabled={isSigning}
-                    className="btn btn-xs btn-primary"
-                  >
-                    {isSigning ? <span className="loading loading-spinner loading-xs" /> : 'Sign'}
-                  </button>
-                )}
-              </div>
+              {signed ? (
+                <span className="badge badge-success badge-xs gap-0.5"><Check size={8} />ok</span>
+              ) : (
+                <button onClick={() => onSign({ kind: row.kind, label: row.key, targetAddress: row.targetAddress, chainId: row.chainId })}
+                  disabled={isSigning} className="btn btn-xs btn-primary h-5 min-h-5">
+                  {isSigning ? <span className="loading loading-spinner loading-xs" /> : 'Sign'}
+                </button>
+              )}
             </div>
           )
         })}
       </div>
 
       {signedCount === rows.length && rows.length > 0 && (
-        <div className="alert alert-success mt-3">
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-          </svg>
-          <span className="text-sm font-medium">All permissions signed! Ready to submit.</span>
+        <div className="alert alert-success py-1 mt-1.5 text-xs">
+          <Check size={12} /> Ready to submit
         </div>
       )}
     </div>
