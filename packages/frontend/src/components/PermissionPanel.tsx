@@ -12,7 +12,6 @@ import type { SelectedTokenPerms } from '../App'
 interface Props {
   chainId: number
   selectedLenders: LenderProtocol[]
-  /** For Aave: set of "tokenType:tokenAddress" keys */
   selectedTokenPerms: SelectedTokenPerms
   signedPermissions: SignedPermission[]
   signing: string | null
@@ -42,7 +41,6 @@ export function buildPermissionRows(
 
   for (const lender of selectedLenders) {
     if (lender.family === 'AAVE') {
-      // Per-token permissions
       const allPerms = getAaveTokenPermissions(lender.id, chainId)
       const selectedKeys = selectedTokenPerms[lender.id]
       if (!selectedKeys) continue
@@ -106,7 +104,7 @@ export function PermissionPanel({
 
   if (selectedLenders.length === 0) {
     return (
-      <div className="text-gray-500 text-sm py-8 text-center">
+      <div className="text-base-content/40 text-sm py-8 text-center">
         Select lenders to see required permissions
       </div>
     )
@@ -114,7 +112,7 @@ export function PermissionPanel({
 
   if (rows.length === 0) {
     return (
-      <div className="text-gray-500 text-sm py-8 text-center">
+      <div className="text-base-content/40 text-sm py-8 text-center">
         Select tokens within each Aave protocol to build permissions
       </div>
     )
@@ -125,18 +123,16 @@ export function PermissionPanel({
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-3">
-        <h2 className="text-lg font-semibold text-gray-300">
-          Permissions to Sign
-          <span className="text-gray-500 text-sm font-normal ml-2">
-            ({signedCount}/{rows.length} signed)
-          </span>
-        </h2>
+      <div className="flex items-center justify-between mb-2">
+        <div>
+          <h2 className="text-lg font-bold">Permissions</h2>
+          <p className="text-xs text-base-content/40">{signedCount}/{rows.length} signed</p>
+        </div>
         {rows.length > 0 && signedCount < rows.length && (
           <button
             onClick={onSignAll}
             disabled={!!signing}
-            className="px-4 py-1.5 rounded-md text-sm font-medium bg-indigo-600 hover:bg-indigo-500 text-white transition-colors disabled:opacity-50"
+            className="btn btn-sm btn-primary"
           >
             Sign All
           </button>
@@ -144,12 +140,12 @@ export function PermissionPanel({
       </div>
 
       {error && (
-        <div className="mb-3 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 text-sm">
-          {error}
+        <div className="alert alert-error alert-sm mb-3">
+          <span className="text-xs">{error}</span>
         </div>
       )}
 
-      <div className="space-y-1.5 max-h-[60vh] overflow-y-auto">
+      <div className="space-y-1 max-h-[60vh] overflow-y-auto">
         {rows.map((row) => {
           const signed = signedKeys.has(row.key)
           const isSigning = signing === row.key
@@ -157,47 +153,38 @@ export function PermissionPanel({
           return (
             <div
               key={row.key}
-              className={`px-4 py-2.5 rounded-lg border transition-all ${
+              className={`flex items-center justify-between gap-2 px-3 py-2 rounded-lg border transition-all ${
                 signed
-                  ? 'border-green-500/40 bg-green-500/5'
-                  : 'border-gray-800 bg-gray-900/50'
+                  ? 'border-success/30 bg-success/5'
+                  : 'border-base-300 bg-base-200'
               }`}
             >
-              <div className="flex items-center justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="text-sm font-medium text-gray-200 truncate">
-                    {row.label}
-                  </div>
-                  <div className="text-xs text-gray-500 mt-0.5">
-                    {row.description}
-                  </div>
-                  <div className="text-xs text-gray-600 font-mono mt-0.5">
-                    {row.targetAddress.slice(0, 6)}...{row.targetAddress.slice(-4)}
-                  </div>
-                </div>
-                <div className="flex-shrink-0">
-                  {signed ? (
-                    <span className="inline-flex items-center gap-1 text-green-400 text-xs font-medium">
-                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                      </svg>
-                      Signed
-                    </span>
-                  ) : (
-                    <button
-                      onClick={() => onSign({
-                        kind: row.kind,
-                        label: row.key,
-                        targetAddress: row.targetAddress,
-                        chainId: row.chainId,
-                      })}
-                      disabled={isSigning}
-                      className="px-3 py-1 rounded-md text-xs font-medium bg-indigo-600 hover:bg-indigo-500 text-white transition-colors disabled:opacity-50"
-                    >
-                      {isSigning ? 'Signing...' : 'Sign'}
-                    </button>
-                  )}
-                </div>
+              <div className="min-w-0">
+                <div className="text-xs font-medium truncate">{row.label}</div>
+                <div className="text-[10px] text-base-content/40 mt-0.5">{row.description}</div>
+              </div>
+              <div className="shrink-0">
+                {signed ? (
+                  <span className="badge badge-success badge-xs gap-1">
+                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                    </svg>
+                    Signed
+                  </span>
+                ) : (
+                  <button
+                    onClick={() => onSign({
+                      kind: row.kind,
+                      label: row.key,
+                      targetAddress: row.targetAddress,
+                      chainId: row.chainId,
+                    })}
+                    disabled={isSigning}
+                    className="btn btn-xs btn-primary"
+                  >
+                    {isSigning ? <span className="loading loading-spinner loading-xs" /> : 'Sign'}
+                  </button>
+                )}
               </div>
             </div>
           )
@@ -205,8 +192,11 @@ export function PermissionPanel({
       </div>
 
       {signedCount === rows.length && rows.length > 0 && (
-        <div className="mt-4 px-4 py-3 rounded-lg bg-green-500/10 border border-green-500/30 text-green-400 text-sm text-center font-medium">
-          All permissions signed! Ready to submit settlement.
+        <div className="alert alert-success mt-3">
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+          </svg>
+          <span className="text-sm font-medium">All permissions signed! Ready to submit.</span>
         </div>
       )}
     </div>

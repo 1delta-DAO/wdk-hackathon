@@ -25,11 +25,11 @@ interface Props {
   onRootChange?: (root: Hex | null, leaves?: GeneratedLeaf[]) => void
 }
 
-const OP_COLORS: Record<string, string> = {
-  Deposit: 'text-emerald-400 bg-emerald-500/10',
-  Borrow: 'text-orange-400 bg-orange-500/10',
-  Repay: 'text-blue-400 bg-blue-500/10',
-  Withdraw: 'text-purple-400 bg-purple-500/10',
+const OP_BADGE: Record<string, string> = {
+  Deposit: 'badge-success',
+  Borrow: 'badge-warning',
+  Repay: 'badge-info',
+  Withdraw: 'badge-secondary',
 }
 
 export function MerklePanel({ chainId, selectedLenders, selectedTokenPerms, morphoMarkets, onRootChange }: Props) {
@@ -122,8 +122,8 @@ export function MerklePanel({ chainId, selectedLenders, selectedTokenPerms, morp
 
   if (leaves.length === 0) {
     return (
-      <div className="text-gray-500 text-sm py-8 text-center">
-        Select Aave tokens, Compound V3 markets, or Morpho markets to auto-generate merkle leaves
+      <div className="text-base-content/40 text-sm py-8 text-center">
+        Select tokens or markets to generate merkle leaves
       </div>
     )
   }
@@ -139,75 +139,72 @@ export function MerklePanel({ chainId, selectedLenders, selectedTokenPerms, morp
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-3">
-        <h2 className="text-lg font-semibold text-gray-300">
-          Merkle Leaves
-          <span className="text-gray-500 text-sm font-normal ml-2">
-            ({leaves.length} operations)
-          </span>
-        </h2>
+      <div className="flex items-center justify-between mb-2">
+        <div>
+          <h2 className="text-lg font-bold">Merkle Leaves</h2>
+          <p className="text-xs text-base-content/40">{leaves.length} operations</p>
+        </div>
       </div>
 
       {/* Merkle Root */}
       {root && (
-        <div className="mb-4 px-4 py-3 rounded-lg bg-indigo-500/10 border border-indigo-500/30">
-          <div className="text-xs font-semibold text-indigo-400 mb-1">Merkle Root</div>
-          <div className="text-xs font-mono text-indigo-300 break-all">{root}</div>
+        <div className="alert alert-info mb-3 py-2">
+          <div>
+            <div className="text-xs font-semibold mb-0.5">Merkle Root</div>
+            <div className="text-xs font-mono break-all opacity-80">{root}</div>
+          </div>
         </div>
       )}
 
       {/* Leaves grouped by underlying */}
-      <div className="space-y-3 max-h-[50vh] overflow-y-auto">
+      <div className="space-y-2 max-h-[50vh] overflow-y-auto">
         {Array.from(grouped.entries()).map(([groupKey, groupLeaves]) => {
           const first = groupLeaves[0]
           const lenderInfo = resolveLender(lenders, first.protocolId)
           const assetInfo = resolveToken(tokens, first.underlying)
 
           return (
-            <div key={groupKey} className="border border-gray-800 rounded-lg overflow-hidden">
-              <div className="px-3 py-2 bg-gray-900/80 border-b border-gray-800 flex items-center gap-2">
-                {lenderInfo.logoURI && (
-                  <img src={lenderInfo.logoURI} alt={lenderInfo.name} className="w-4 h-4 rounded-full" />
-                )}
-                <span className="text-xs font-medium text-gray-300">
-                  {lenderInfo.name}
-                </span>
-                <span className="text-gray-700 text-xs">|</span>
-                {assetInfo.logoURI && (
-                  <img src={assetInfo.logoURI} alt={assetInfo.symbol} className="w-4 h-4 rounded-full" />
-                )}
-                <span className="text-xs font-medium text-gray-400">
-                  {assetInfo.symbol}
-                </span>
-                <span className="text-xs text-gray-600 font-mono ml-auto" title={first.underlying}>
-                  {first.underlying.slice(0, 6)}...{first.underlying.slice(-4)}
-                </span>
-              </div>
-              <div className="divide-y divide-gray-800/50">
-                {groupLeaves.map((leaf, i) => (
-                  <div key={i} className="px-3 py-2 flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2">
-                      <span className={`text-xs font-medium px-1.5 py-0.5 rounded ${OP_COLORS[leaf.opName]}`}>
-                        {leaf.opName}
-                      </span>
-                      <span className="text-xs text-gray-500">
-                        {resolveLender(lenders, leaf.protocolId).name}
+            <div key={groupKey} className="card card-compact bg-base-200 border border-base-300">
+              <div className="card-body p-0">
+                <div className="flex items-center gap-2 px-3 py-1.5 border-b border-base-300">
+                  {lenderInfo.logoURI && (
+                    <img src={lenderInfo.logoURI} alt={lenderInfo.name} className="w-4 h-4 rounded-full" />
+                  )}
+                  <span className="text-xs font-semibold">{lenderInfo.name}</span>
+                  <span className="text-base-content/20">|</span>
+                  {assetInfo.logoURI && (
+                    <img src={assetInfo.logoURI} alt={assetInfo.symbol} className="w-4 h-4 rounded-full" />
+                  )}
+                  <span className="text-xs font-medium text-base-content/60">{assetInfo.symbol}</span>
+                  <span className="text-xs text-base-content/30 font-mono ml-auto" title={first.underlying}>
+                    {first.underlying.slice(0, 6)}...{first.underlying.slice(-4)}
+                  </span>
+                </div>
+                <div className="divide-y divide-base-300">
+                  {groupLeaves.map((leaf, i) => (
+                    <div key={i} className="flex items-center justify-between gap-2 px-3 py-1.5">
+                      <div className="flex items-center gap-2">
+                        <span className={`badge badge-xs ${OP_BADGE[leaf.opName]}`}>
+                          {leaf.opName}
+                        </span>
+                        <span className="text-xs text-base-content/40">
+                          {resolveLender(lenders, leaf.protocolId).name}
+                        </span>
+                      </div>
+                      <span className="text-[10px] font-mono text-base-content/30 truncate max-w-[100px]" title={leaf.leaf}>
+                        {leaf.leaf.slice(0, 10)}...
                       </span>
                     </div>
-                    <span className="text-xs font-mono text-gray-600 truncate max-w-[120px]" title={leaf.leaf}>
-                      {leaf.leaf.slice(0, 10)}...
-                    </span>
-                  </div>
-                ))}
+                  ))}
+                </div>
               </div>
             </div>
           )
         })}
       </div>
 
-      {/* Proof count */}
-      <div className="mt-3 text-xs text-gray-600 text-center">
-        Tree depth: {proofs[0]?.length ?? 0} | Proofs generated for all {leaves.length} leaves
+      <div className="text-center text-xs text-base-content/30 mt-2">
+        Depth: {proofs[0]?.length ?? 0} | {leaves.length} leaves
       </div>
     </div>
   )

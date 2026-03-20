@@ -8,6 +8,7 @@ import { AaveTokenSelector } from './components/AaveTokenSelector'
 import { PermissionPanel, buildPermissionRows } from './components/PermissionPanel'
 import { MerklePanel } from './components/MerklePanel'
 import { ConnectButton } from './components/ConnectButton'
+import { ThemeSelector } from './components/ThemeSelector'
 import {
   getLendersForChain,
   getAaveTokenPermissions,
@@ -28,7 +29,7 @@ import {
 
 /** Map of protocolId -> Set of "tokenType:tokenAddress" keys */
 export type SelectedTokenPerms = Record<string, Set<string>>
-type HfMode = 'all' | 'per_lender' // set per lender or all lenders
+type HfMode = 'all' | 'per_lender'
 
 export default function App() {
   const { isConnected } = useAccount()
@@ -106,7 +107,7 @@ export default function App() {
             conditions.push({
               lenderId: protocolToLenderId(lender.id),
               comet,
-              assetBitmap: 0xFFFF, // all collateral assets
+              assetBitmap: 0xFFFF,
               minHealthFactor: hf,
             })
           }
@@ -185,7 +186,6 @@ export default function App() {
       const next = new Set(prev)
       if (next.has(lenderId)) {
         next.delete(lenderId)
-        // Also remove token perms for this lender
         setSelectedTokenPerms(prev => {
           const copy = { ...prev }
           delete copy[lenderId]
@@ -221,7 +221,6 @@ export default function App() {
       const current = prev[protocolId] ?? new Set<string>()
       const allSelected = keys.every(k => current.has(k))
       if (allSelected) {
-        // Deselect all
         return { ...prev, [protocolId]: new Set<string>() }
       } else {
         return { ...prev, [protocolId]: new Set(keys) }
@@ -246,22 +245,22 @@ export default function App() {
   }, [activeChainId, selectedLenders, selectedTokenPerms, signedPermissions, signPermission])
 
   return (
-    <div className="min-h-screen flex flex-col">
-      {/* Header */}
-      <header className="border-b border-gray-800 px-6 py-4">
-        <div className="max-w-6xl mx-auto flex items-center justify-between">
-          <div>
-            <h1 className="text-xl font-bold text-white">Settlement Permissions</h1>
-            <p className="text-sm text-gray-500">Pre-sign lending protocol authorizations</p>
-          </div>
+    <div className="min-h-screen flex flex-col bg-base-100">
+      {/* Navbar */}
+      <nav className="navbar bg-base-200 border-b border-base-300 px-4">
+        <div className="navbar-start">
+          <h1 className="text-lg font-bold">1delta Agents Gateway</h1>
+        </div>
+        <div className="navbar-end gap-3">
+          <ThemeSelector />
           <ConnectButton />
         </div>
-      </header>
+      </nav>
 
       {/* Main content */}
-      <main className="flex-1 px-6 py-8">
-        <div className="max-w-6xl mx-auto space-y-8">
-          {/* Step 1: Chain */}
+      <main className="flex-1 px-4 py-6">
+        <div className="max-w-6xl mx-auto space-y-6">
+          {/* Chain selector */}
           <section>
             <ChainSelector
               selectedChainId={activeChainId}
@@ -270,24 +269,26 @@ export default function App() {
           </section>
 
           {activeChainId && (
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-              {/* Column 1: Lender selection */}
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+              {/* Column 1: Lenders */}
               <section className="lg:col-span-3">
-                <LenderList
-                  lenders={lenders}
-                  selectedLenders={selectedLenderIds}
-                  onToggle={handleToggleLender}
-                />
+                <div className="card bg-base-200 border border-base-300">
+                  <div className="card-body p-3">
+                    <LenderList
+                      lenders={lenders}
+                      selectedLenders={selectedLenderIds}
+                      onToggle={handleToggleLender}
+                    />
+                  </div>
+                </div>
               </section>
 
-              {/* Column 2: Token selection */}
+              {/* Column 2: Tokens */}
               <section className="lg:col-span-5">
                 {selectedLenders.length > 0 ? (
                   <div>
-                    <h2 className="text-lg font-semibold mb-3 text-gray-300">
-                      Select Tokens
-                    </h2>
-                    <div className="space-y-3">
+                    <h2 className="text-lg font-bold mb-2">Tokens</h2>
+                    <div className="space-y-2">
                       {aaveLenders.map(lender => {
                         const perms = getAaveTokenPermissions(lender.id, activeChainId)
                         return (
@@ -304,39 +305,41 @@ export default function App() {
                       })}
 
                       {selectedLenders.some(l => l.family === 'MORPHO_BLUE') && (
-                        <div className="border border-gray-800 rounded-lg overflow-hidden">
-                          <div className="px-4 py-2.5 bg-gray-900/80 border-b border-gray-800">
-                            <span className="text-sm font-medium text-purple-300">Morpho Blue</span>
-                          </div>
-                          <div className="px-4 py-3">
-                            <div className="text-xs text-gray-500">
-                              {morphoLoading
-                                ? 'Loading markets...'
-                                : morphoError
-                                  ? <span className="text-red-400">Failed to load markets: {morphoError}</span>
-                                  : `${morphoMarkets.length} market${morphoMarkets.length !== 1 ? 's' : ''} found (TVL > $100k)`}
+                        <div className="card card-compact bg-base-200 border border-base-300">
+                          <div className="card-body p-0">
+                            <div className="flex items-center justify-between px-3 py-2 border-b border-base-300">
+                              <span className="text-sm font-semibold text-info">Morpho Blue</span>
+                              <span className="badge badge-success badge-xs gap-1">
+                                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                                </svg>
+                                All permissioned
+                              </span>
                             </div>
-                            <div className="flex items-center gap-1.5 mt-2">
-                              <svg className="w-3.5 h-3.5 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                              </svg>
-                              <span className="text-xs text-emerald-400">All markets permissioned</span>
+                            <div className="px-3 py-2">
+                              <span className="text-xs text-base-content/50">
+                                {morphoLoading
+                                  ? <span className="loading loading-dots loading-xs" />
+                                  : morphoError
+                                    ? <span className="text-error">{morphoError}</span>
+                                    : `${morphoMarkets.length} market${morphoMarkets.length !== 1 ? 's' : ''} (TVL > $100k)`}
+                              </span>
                             </div>
                           </div>
                         </div>
                       )}
 
                       {selectedLenders.filter(l => l.family === 'COMPOUND_V3').map(lender => (
-                        <div key={lender.id} className="border border-gray-800 rounded-lg overflow-hidden">
-                          <div className="px-4 py-2.5 bg-gray-900/80 border-b border-gray-800">
-                            <span className="text-sm font-medium text-purple-300">{lender.label}</span>
-                          </div>
-                          <div className="px-4 py-3">
-                            <div className="flex items-center gap-1.5">
-                              <svg className="w-3.5 h-3.5 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                              </svg>
-                              <span className="text-xs text-emerald-400">All tokens permissioned</span>
+                        <div key={lender.id} className="card card-compact bg-base-200 border border-base-300">
+                          <div className="card-body p-0">
+                            <div className="flex items-center justify-between px-3 py-2 border-b border-base-300">
+                              <span className="text-sm font-semibold text-accent">{lender.label}</span>
+                              <span className="badge badge-success badge-xs gap-1">
+                                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                                </svg>
+                                All permissioned
+                              </span>
                             </div>
                           </div>
                         </div>
@@ -346,180 +349,183 @@ export default function App() {
                 ) : null}
               </section>
 
-              {/* Column 3: Permissions to sign */}
+              {/* Column 3: Permissions */}
               <section className="lg:col-span-4">
-                <PermissionPanel
-                  chainId={activeChainId}
-                  selectedLenders={selectedLenders}
-                  selectedTokenPerms={selectedTokenPerms}
-                  signedPermissions={signedPermissions}
-                  signing={signing}
-                  error={error}
-                  onSign={signPermission}
-                  onSignAll={handleSignAll}
-                  settlementAddress={settlementAddress}
-                />
+                <div className="card bg-base-200 border border-base-300">
+                  <div className="card-body p-3">
+                    <PermissionPanel
+                      chainId={activeChainId}
+                      selectedLenders={selectedLenders}
+                      selectedTokenPerms={selectedTokenPerms}
+                      signedPermissions={signedPermissions}
+                      signing={signing}
+                      error={error}
+                      onSign={signPermission}
+                      onSignAll={handleSignAll}
+                      settlementAddress={settlementAddress}
+                    />
+                  </div>
+                </div>
               </section>
             </div>
           )}
 
-          {/* HF (liquidation preventer) + Merkle + Order data */}
+          {/* Health Factor + Merkle + Order */}
           {activeChainId && selectedLenders.some(l => l.family === 'AAVE' || l.family === 'COMPOUND_V3' || l.family === 'MORPHO_BLUE') && (
-            <section className="space-y-6">
-              {/* Health factor checks (Liquidation preventer) */}
-              <div className="rounded-lg border border-gray-800 bg-gray-900/50 p-4">
-                <h2 className="text-lg font-semibold text-gray-300 mb-2">
-                  Liquidation Preventer
-                </h2>
-                <p className="text-sm text-gray-500 mb-3">
-                  Minimum health factor after settlement (e.g. 1.05 = 5% buffer, 1.2 = 20% buffer).
-                  Leave empty for no condition.
-                </p>
-                <div className="flex flex-wrap items-center gap-4 mb-4">
-                  <label className="inline-flex items-center gap-2 text-sm text-gray-300">
-                    <input
-                      type="radio"
-                      name="hf-mode"
-                      checked={hfMode === 'all'}
-                      onChange={() => setHfMode('all')}
-                    />
-                    Set for all selected lenders
-                  </label>
-                  <label className="inline-flex items-center gap-2 text-sm text-gray-300">
-                    <input
-                      type="radio"
-                      name="hf-mode"
-                      checked={hfMode === 'per_lender'}
-                      onChange={() => setHfMode('per_lender')}
-                    />
-                    Set per lender
-                  </label>
-                </div>
-                {hfMode === 'all' ? (
-                  <input
-                    type="number"
-                    min="1"
-                    step="0.05"
-                    placeholder="e.g. 1.2"
-                    value={minHealthFactor}
-                    onChange={(e) => setMinHealthFactor(e.target.value)}
-                    className="w-full max-w-xs px-3 py-2 rounded-lg bg-gray-800 border border-gray-700 text-gray-200 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
-                  />
-                ) : (
-                  <div className="space-y-2">
-                    {lendersForSafety.length === 0 ? (
-                      <div className="text-sm text-gray-500">Select Aave or Compound V3 lenders first.</div>
-                    ) : (
-                      lendersForSafety.map((lender) => {
-                        const raw = perLenderHealthFactor[lender.id] ?? ''
-                        const num = raw.trim() ? parseFloat(raw) : 0
+            <section className="space-y-4">
+              {/* Liquidation Preventer */}
+              <div className="card bg-base-200 border border-base-300">
+                <div className="card-body p-4">
+                  <h2 className="card-title text-base">Liquidation Preventer</h2>
+                  <p className="text-xs text-base-content/50">
+                    Min health factor after settlement (e.g. 1.05 = 5% buffer). Leave empty for no condition.
+                  </p>
 
-                        const cid = String(activeChainId)
-                        const willApply =
-                          num >= 1.0 &&
-                          (lender.family === 'COMPOUND_V3'
-                            ? Boolean(COMPOUND_V3_POOLS[cid]?.[lender.id])
-                            : lender.family === 'AAVE'
-                              ? Boolean(AAVE_POOLS[lender.id]?.[cid]) &&
-                                Boolean(selectedTokenPerms[lender.id] && selectedTokenPerms[lender.id].size > 0)
-                              : lender.family === 'MORPHO_BLUE'
-                                ? Boolean(MORPHO_BLUE_ADDRESSES[cid]) && morphoMarkets.length > 0
-                                : false)
-
-                        return (
-                          <div key={lender.id} className="flex items-center gap-3">
-                            <div className="text-sm text-gray-300 min-w-44 flex items-center gap-2">
-                              <span>{lender.label}</span>
-                              <span
-                                className={`text-[10px] px-2 py-0.5 rounded-full border ${
-                                  willApply
-                                    ? 'text-emerald-400 border-emerald-500/30 bg-emerald-500/10'
-                                    : 'text-gray-400 border-gray-700 bg-gray-800/50'
-                                }`}
-                                title={
-                                  willApply
-                                    ? 'This lender will be included in settlementData conditions'
-                                    : 'Set HF ≥ 1.0 and ensure the lender has selections (Aave tokens / C3 market) to include it'
-                                }
-                              >
-                                {willApply ? 'Active' : 'Inactive'}
-                              </span>
-                            </div>
-                          <input
-                            type="number"
-                            min="1"
-                            step="0.05"
-                            placeholder="e.g. 1.2"
-                            value={perLenderHealthFactor[lender.id] ?? ''}
-                            onChange={(e) =>
-                              setPerLenderHealthFactor((prev) => ({ ...prev, [lender.id]: e.target.value }))
-                            }
-                            className="w-full max-w-xs px-3 py-2 rounded-lg bg-gray-800 border border-gray-700 text-gray-200 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
-                          />
-                          </div>
-                        )
-                      })
-                    )}
+                  <div className="flex flex-wrap items-center gap-4 mt-2">
+                    <label className="label cursor-pointer gap-2">
+                      <input
+                        type="radio"
+                        name="hf-mode"
+                        className="radio radio-primary radio-xs"
+                        checked={hfMode === 'all'}
+                        onChange={() => setHfMode('all')}
+                      />
+                      <span className="label-text text-sm">All lenders</span>
+                    </label>
+                    <label className="label cursor-pointer gap-2">
+                      <input
+                        type="radio"
+                        name="hf-mode"
+                        className="radio radio-primary radio-xs"
+                        checked={hfMode === 'per_lender'}
+                        onChange={() => setHfMode('per_lender')}
+                      />
+                      <span className="label-text text-sm">Per lender</span>
+                    </label>
                   </div>
-                )}
+
+                  {hfMode === 'all' ? (
+                    <input
+                      type="number"
+                      min="1"
+                      step="0.05"
+                      placeholder="e.g. 1.2"
+                      value={minHealthFactor}
+                      onChange={(e) => setMinHealthFactor(e.target.value)}
+                      className="input input-bordered input-sm w-full max-w-xs mt-1"
+                    />
+                  ) : (
+                    <div className="space-y-2 mt-1">
+                      {lendersForSafety.length === 0 ? (
+                        <div className="text-sm text-base-content/40">Select lenders first.</div>
+                      ) : (
+                        lendersForSafety.map((lender) => {
+                          const raw = perLenderHealthFactor[lender.id] ?? ''
+                          const num = raw.trim() ? parseFloat(raw) : 0
+
+                          const cid = String(activeChainId)
+                          const willApply =
+                            num >= 1.0 &&
+                            (lender.family === 'COMPOUND_V3'
+                              ? Boolean(COMPOUND_V3_POOLS[cid]?.[lender.id])
+                              : lender.family === 'AAVE'
+                                ? Boolean(AAVE_POOLS[lender.id]?.[cid]) &&
+                                  Boolean(selectedTokenPerms[lender.id] && selectedTokenPerms[lender.id].size > 0)
+                                : lender.family === 'MORPHO_BLUE'
+                                  ? Boolean(MORPHO_BLUE_ADDRESSES[cid]) && morphoMarkets.length > 0
+                                  : false)
+
+                          return (
+                            <div key={lender.id} className="flex items-center gap-3">
+                              <div className="text-sm min-w-40 flex items-center gap-2">
+                                <span>{lender.label}</span>
+                                <span className={`badge badge-xs ${willApply ? 'badge-success' : 'badge-ghost'}`}>
+                                  {willApply ? 'Active' : 'Inactive'}
+                                </span>
+                              </div>
+                              <input
+                                type="number"
+                                min="1"
+                                step="0.05"
+                                placeholder="e.g. 1.2"
+                                value={perLenderHealthFactor[lender.id] ?? ''}
+                                onChange={(e) =>
+                                  setPerLenderHealthFactor((prev) => ({ ...prev, [lender.id]: e.target.value }))
+                                }
+                                className="input input-bordered input-sm w-full max-w-xs"
+                              />
+                            </div>
+                          )
+                        })
+                      )}
+                    </div>
+                  )}
+                </div>
               </div>
 
-              <MerklePanel
-                chainId={activeChainId}
-                selectedLenders={selectedLenders}
-                selectedTokenPerms={selectedTokenPerms}
-                morphoMarkets={morphoMarkets}
-                onRootChange={handleRootChange}
-              />
+              {/* Merkle Panel */}
+              <div className="card bg-base-200 border border-base-300">
+                <div className="card-body p-4">
+                  <MerklePanel
+                    chainId={activeChainId}
+                    selectedLenders={selectedLenders}
+                    selectedTokenPerms={selectedTokenPerms}
+                    morphoMarkets={morphoMarkets}
+                    onRootChange={handleRootChange}
+                  />
+                </div>
+              </div>
 
-              {/* Order data (signed payload) */}
+              {/* Order Data */}
               {orderData && (
-                <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-4">
-                  <h2 className="text-lg font-semibold text-amber-400 mb-2">
-                    Order Data
-                  </h2>
-                  <p className="text-sm text-gray-500 mb-2">
-                    {conditionCount > 0
-                      ? hfMode === 'all'
-                        ? `Conditions: ${conditionCount}, min HF (all): ${minHealthFactor || '—'}`
-                        : `Conditions: ${conditionCount}, min HF mode: per lender`
-                      : 'No conditions'}
-                    {deployedSettlement
-                      ? ` · Settlement: ${deployedSettlement.slice(0, 6)}...${deployedSettlement.slice(-4)}`
-                      : ' · No settlement deployed on this chain'}
-                  </p>
-                  <div className="flex items-start gap-3">
-                    <pre className="flex-1 text-xs font-mono text-amber-200/90 break-all overflow-x-auto max-h-24 overflow-y-auto">
-                      {orderData}
-                    </pre>
-                    <div className="shrink-0 flex flex-col gap-2">
-                      <button
-                        type="button"
-                        onClick={handleCopyOrderData}
-                        className="px-3 py-1.5 rounded-lg bg-amber-500/20 text-amber-400 hover:bg-amber-500/30 text-sm font-medium"
-                      >
-                        Copy
-                      </button>
-                      <button
-                        type="button"
-                        onClick={handleSubmitOrder}
-                        disabled={orderSubmitting || !deployedSettlement || !isConnected}
-                        className="px-3 py-1.5 rounded-lg bg-indigo-500/20 text-indigo-400 hover:bg-indigo-500/30 text-sm font-medium disabled:opacity-40 disabled:cursor-not-allowed"
-                      >
-                        {orderSubmitting ? 'Signing...' : 'Sign & Submit'}
-                      </button>
+                <div className="card bg-base-200 border border-warning/30">
+                  <div className="card-body p-4">
+                    <h2 className="card-title text-base text-warning">Order Data</h2>
+                    <p className="text-xs text-base-content/50">
+                      {conditionCount > 0
+                        ? hfMode === 'all'
+                          ? `Conditions: ${conditionCount}, min HF: ${minHealthFactor || '--'}`
+                          : `Conditions: ${conditionCount}, per-lender HF`
+                        : 'No conditions'}
+                      {deployedSettlement
+                        ? ` | Settlement: ${deployedSettlement.slice(0, 6)}...${deployedSettlement.slice(-4)}`
+                        : ' | No settlement on this chain'}
+                    </p>
+
+                    <div className="flex items-start gap-3 mt-1">
+                      <pre className="flex-1 text-xs font-mono break-all overflow-x-auto max-h-20 overflow-y-auto bg-base-300 rounded-lg p-2 text-base-content/70">
+                        {orderData}
+                      </pre>
+                      <div className="shrink-0 flex flex-col gap-1.5">
+                        <button
+                          type="button"
+                          onClick={handleCopyOrderData}
+                          className="btn btn-xs btn-outline btn-warning"
+                        >
+                          Copy
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleSubmitOrder}
+                          disabled={orderSubmitting || !deployedSettlement || !isConnected}
+                          className="btn btn-xs btn-primary"
+                        >
+                          {orderSubmitting ? <span className="loading loading-spinner loading-xs" /> : 'Sign & Submit'}
+                        </button>
+                      </div>
                     </div>
+
+                    {orderSubmitted && (
+                      <div className="alert alert-success py-2 mt-2">
+                        <span className="text-xs">Order submitted! ID: {orderSubmitted.id}</span>
+                      </div>
+                    )}
+                    {orderError && (
+                      <div className="alert alert-error py-2 mt-2">
+                        <span className="text-xs">{orderError}</span>
+                      </div>
+                    )}
                   </div>
-                  {orderSubmitted && (
-                    <div className="mt-3 text-sm text-emerald-400">
-                      Order submitted! ID: {orderSubmitted.id}
-                    </div>
-                  )}
-                  {orderError && (
-                    <div className="mt-3 text-sm text-red-400">
-                      {orderError}
-                    </div>
-                  )}
                 </div>
               )}
             </section>
@@ -528,10 +534,8 @@ export default function App() {
       </main>
 
       {/* Footer */}
-      <footer className="border-t border-gray-800 px-6 py-3">
-        <div className="max-w-6xl mx-auto text-center text-xs text-gray-600">
-          1delta Settlement - Hackathon
-        </div>
+      <footer className="footer footer-center p-3 bg-base-200 text-base-content/40 border-t border-base-300">
+        <p className="text-xs">1delta Agents Gateway</p>
       </footer>
     </div>
   )
