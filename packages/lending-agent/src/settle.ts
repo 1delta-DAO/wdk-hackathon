@@ -16,8 +16,7 @@ import {
 } from '@1delta/settlement-sdk'
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import type { MerkleLeaf, StoredOrder } from './order.js'
-import { callTool } from './mcp.js'
-import { DRY_RUN, ECONOMIC_MODE, RPC_URL_BY_CHAIN, CONTRACTS_BY_CHAIN, CHAIN_NAMES } from './config.js'
+import { DRY_RUN, ECONOMIC_MODE, RPC_URL_BY_CHAIN, CONTRACTS_BY_CHAIN } from './config.js'
 
 // Morpho Blue is the flash loan provider — same address on all supported chains
 const MORPHO_BLUE = '0xBBBBBbbBBb9cC5e90e3b3Af64bdAF62C37EEFFCb' as Address
@@ -196,7 +195,7 @@ export function buildSettlementTx(input: SettlementInput): {
  * is enabled and the estimated gas cost exceeds the solver fee.
  */
 export async function executeSettlement(
-  wdkClient: Client,
+  _wdkClient: Client,
   input: SettlementInput,
 ): Promise<string> {
   const tx = buildSettlementTx(input)
@@ -210,6 +209,7 @@ export async function executeSettlement(
   console.log(`  collateral:    ${input.collateralAsset}`)
   console.log(`  source lender: ${input.sourceRepayLeaf.lender}`)
   console.log(`  dest lender:   ${input.destDepositLeaf.lender}`)
+  console.log(`  fee recipient: ${input.feeRecipient}`)
 
   if (ECONOMIC_MODE) {
     const chainContracts = CONTRACTS_BY_CHAIN[input.order.order.chainId]
@@ -245,19 +245,18 @@ export async function executeSettlement(
     return 'DRY_RUN'
   }
 
-  const chain = CHAIN_NAMES[tx.chainId]
-  if (!chain) throw new Error(`No chain name mapping for chainId ${tx.chainId}`)
+  const rpcUrl = RPC_URL_BY_CHAIN[tx.chainId]
+  if (!rpcUrl) throw new Error(`No RPC URL for chainId ${tx.chainId}`)
 
-  const result = await callTool(wdkClient, 'sendContractTransaction', {
-    to: tx.to,
-    data: tx.data,
-    chain,
-  })
+  const seed = process.env.WDK_SEED
+  if (!seed) throw new Error('WDK_SEED env var is required for transaction signing')
 
-  console.log('  tx result:', result)
+  // Dynamic import keeps the CommonJS WDK wallet out of the Cloudflare Workers bundle path
+  const WalletManagerEvm = (await import('@tetherto/wdk-wallet-evm')).default
+  const wallet = new WalletManagerEvm(seed, { provider: rpcUrl })
+  const account = await wallet.getAccount(0)
 
-  // Treat MCP errors and non-hex results as failures
-  if (!result.startsWith('0x')) throw new Error(`sendTransaction failed: ${result}`)
-
-  return result
+  const { hash } = await account.sendTransaction({ to: tx.to, data: tx.data, value: 0n })
+  console.log('  tx hash:', hash)
+  return hash
 }

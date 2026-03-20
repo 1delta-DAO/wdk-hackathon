@@ -19,6 +19,7 @@
     "@1delta/settlement-sdk": "workspace:*",
     "@anthropic-ai/sdk": "^0.78.0",
     "@modelcontextprotocol/sdk": "^1.23.0",
+    "@tetherto/wdk-wallet-evm": "1.0.0-beta.8",
     "openai": "^6.32.0",
     "viem": "^2.47.5"
   },
