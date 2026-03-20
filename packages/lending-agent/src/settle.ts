@@ -6,7 +6,7 @@
  * via WDK sendTransaction.
  */
 
-import { encodeFunctionData } from 'viem'
+import { encodeFunctionData, createPublicClient, http, parseAbi } from 'viem'
 import type { Hex, Address } from 'viem'
 import {
   encodeExecutionData,
@@ -17,10 +17,72 @@ import {
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import type { MerkleLeaf, StoredOrder } from './order.js'
 import { callTool } from './mcp.js'
-import { DRY_RUN } from './config.js'
+import { DRY_RUN, ECONOMIC_MODE, RPC_URL_BY_CHAIN, CONTRACTS_BY_CHAIN } from './config.js'
 
 // Morpho Blue is the flash loan provider — same address on all supported chains
 const MORPHO_BLUE = '0xBBBBBbbBBb9cC5e90e3b3Af64bdAF62C37EEFFCb' as Address
+
+// WETH on Arbitrum — used to price ETH gas costs via the Aave oracle
+const WETH_ARB = '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1' as Address
+
+const AAVE_ORACLE_ABI = parseAbi([
+  'function getAssetPrice(address asset) external view returns (uint256)',
+])
+
+const ERC20_ABI = parseAbi([
+  'function decimals() external view returns (uint8)',
+])
+
+export interface EconomicCheckResult {
+  viable: boolean
+  reason: string
+  solverFeeUsdE8: bigint
+  gasCostUsdE8: bigint
+}
+
+/**
+ * Checks whether executing the settlement is economically worthwhile:
+ * solverFee (USD) must exceed estimated gas cost (USD).
+ *
+ * Prices are sourced from the Aave oracle (8-decimal USD values).
+ * If any price/gas call fails the check is skipped and execution proceeds.
+ */
+export async function checkEconomicViability(
+  input: SettlementInput,
+  txData: { to: Address; data: Hex },
+  flashAmount: bigint,
+  aaveOracleAddress: Address,
+  fromAddress: Address,
+  rpcUrl: string,
+): Promise<EconomicCheckResult> {
+  const client = createPublicClient({ transport: http(rpcUrl) })
+
+  // Solver fee in debt token base units
+  const solverFeeBaseUnits = (flashAmount * BigInt(input.order.order.maxFeeBps)) / 10_000_000n
+
+  const [gasEstimate, gasPrice, ethPrice, debtPrice, debtDecimals] = await Promise.all([
+    client.estimateGas({ account: fromAddress, to: txData.to, data: txData.data }),
+    client.getGasPrice(),
+    client.readContract({ address: aaveOracleAddress, abi: AAVE_ORACLE_ABI, functionName: 'getAssetPrice', args: [WETH_ARB] }),
+    client.readContract({ address: aaveOracleAddress, abi: AAVE_ORACLE_ABI, functionName: 'getAssetPrice', args: [input.debtAsset] }),
+    client.readContract({ address: input.debtAsset, abi: ERC20_ABI, functionName: 'decimals' }),
+  ])
+
+  // Gas cost in USD (8 decimal precision): gasCostWei * ethPrice / 1e18
+  const gasCostUsdE8 = (gasEstimate * gasPrice * ethPrice) / BigInt(1e18)
+
+  // Solver fee in USD (8 decimal precision): feeBaseUnits * debtPrice / 10^debtDecimals
+  const solverFeeUsdE8 = (solverFeeBaseUnits * debtPrice) / (10n ** BigInt(debtDecimals))
+
+  const viable = solverFeeUsdE8 >= gasCostUsdE8
+
+  const fmtUsd = (v: bigint) => `$${(Number(v) / 1e8).toFixed(6)}`
+  const reason = viable
+    ? `solverFee ${fmtUsd(solverFeeUsdE8)} >= gasCost ${fmtUsd(gasCostUsdE8)} — proceeding`
+    : `solverFee ${fmtUsd(solverFeeUsdE8)} < gasCost ${fmtUsd(gasCostUsdE8)} — skipping (not economic)`
+
+  return { viable, reason, solverFeeUsdE8, gasCostUsdE8 }
+}
 
 export interface SettlementInput {
   order: StoredOrder
@@ -130,7 +192,8 @@ export function buildSettlementTx(input: SettlementInput): {
 
 /**
  * Builds and submits the settlement transaction via WDK sendTransaction.
- * Returns the transaction hash.
+ * Returns the transaction hash, or 'SKIPPED_NOT_ECONOMIC' if ECONOMIC_MODE
+ * is enabled and the estimated gas cost exceeds the solver fee.
  */
 export async function executeSettlement(
   wdkClient: Client,
@@ -147,6 +210,34 @@ export async function executeSettlement(
   console.log(`  collateral:    ${input.collateralAsset}`)
   console.log(`  source lender: ${input.sourceRepayLeaf.lender}`)
   console.log(`  dest lender:   ${input.destDepositLeaf.lender}`)
+
+  if (ECONOMIC_MODE) {
+    const chainContracts = CONTRACTS_BY_CHAIN[input.order.order.chainId]
+    const fromAddress = input.feeRecipient ?? input.user
+    console.log('\n[Economic check] Estimating gas vs solver fee…')
+    try {
+      const rpcUrl = RPC_URL_BY_CHAIN[tx.chainId]
+      if (!rpcUrl) throw new Error('RPC not found')
+
+      const check = await checkEconomicViability(
+        input,
+        { to: tx.to, data: tx.data },
+        tx.flashAmount,
+        chainContracts.aaveOracle,
+        fromAddress,
+        rpcUrl
+      )
+      console.log(`  ${check.reason}`)
+      if (!check.viable) {
+        return 'SKIPPED_NOT_ECONOMIC'
+      }
+    } catch (err) {
+      // If the check itself fails (e.g. RPC issue), skip rather than risk a loss
+      const msg = err instanceof Error ? err.message : String(err)
+      console.warn(`  Economic check failed (${msg}) — skipping to be safe`)
+      return 'SKIPPED_NOT_ECONOMIC'
+    }
+  }
 
   if (DRY_RUN) {
     console.log('\n[DRY RUN] Not submitting. Calldata:')

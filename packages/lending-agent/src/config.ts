@@ -3,6 +3,12 @@ export const ONEDELTA_MCP_URL = 'https://mcp-prototype.1delta.io/mcp'
 export const CHAIN_FILTER: string = process.env.CHAIN_FILTER ?? ''
 export const DRY_RUN: boolean = process.env.DRY_RUN === 'true'
 
+/**
+ * When true, the agent skips settlements where estimated gas cost exceeds
+ * the solver fee allowed by the order's maxFeeBps. Disable with ECONOMIC_MODE=false.
+ */
+export const ECONOMIC_MODE: boolean = process.env.ECONOMIC_MODE !== 'false'
+
 // Cap tool results to ~1500 tokens to keep context window manageable
 export const RESULT_CHAR_LIMIT = 6000
 
@@ -19,3 +25,6 @@ export const CONTRACTS_BY_CHAIN: Record<number, {
   },
 }
 
+export const RPC_URL_BY_CHAIN: Record<number, string> ={
+  42161: 'https://arb1.arbitrum.io/rpc'
+}
