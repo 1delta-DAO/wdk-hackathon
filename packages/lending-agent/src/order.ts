@@ -219,8 +219,8 @@ export async function fetchOpenOrders(chainId: number, signer?: Address): Promis
   const res = await fetch(url.toString())
   if (!res.ok) throw new Error(`Order backend error: ${res.status} ${await res.text()}`)
 
-  const data = await res.json() as { orders: StoredOrder[] }
-  return data.orders
+  const data = await res.json() as StoredOrder[]
+  return data ?? []
 }
 
 export async function fetchOrder(id: string, chainId: number): Promise<StoredOrder> {
