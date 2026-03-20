@@ -132,7 +132,7 @@ export async function runSettlementFlow(
     proposeMigrationTool,
   ]
 
-  const systemPrompt = buildSettlementSystemPrompt(walletAddress, chainId, leafDescriptions)
+  const systemPrompt = buildSettlementSystemPrompt(walletAddress, order.signer, chainId, leafDescriptions)
   const userMessage = `Analyze the available leaves for order ${orderId} on chain ${chainId} and find the best migration to execute.`
 
   const router = createRouter(toolClientMap, { propose_migration: proposeMigration })

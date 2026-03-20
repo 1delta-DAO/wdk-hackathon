@@ -10,6 +10,7 @@ import type { LeafDescription } from './order.js'
  */
 export function buildSettlementSystemPrompt(
   walletAddress: string,
+  orderSigner: string,
   chainId: number,
   leaves: LeafDescription[],
 ): string {
@@ -35,6 +36,7 @@ Your job is to find the best migration among the allowed options and execute it.
 
 CHAIN: ${chainId}
 WALLET: ${walletAddress || 'UNKNOWN — call getAddress(chain="ethereum") first'}
+ORDER SIGNER: ${orderSigner}
 
 AVAILABLE LEAVES (signed by the user — reference by index):
 ${leavesText}
@@ -46,7 +48,7 @@ Only consider destinations different from the user's current protocol.
 If no improvement is found, report that clearly — do not execute.
 
 WORKFLOW:
-1. Call get_user_positions with account="${walletAddress}", chains="${chainId}" to find the current position.
+1. Call get_user_positions with account="${orderSigner}", chains="${chainId}" to find the current position.
    This tells you which protocol the user is currently on and the underlying token addresses.
 2. Identify the SOURCE leaves (REPAY + WITHDRAW pair) matching the current position's protocol and pool/market.
 3. For each DESTINATION leaf pair (DEPOSIT + BORROW), call find_market twice:
