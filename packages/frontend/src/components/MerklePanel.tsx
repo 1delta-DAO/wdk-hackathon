@@ -14,6 +14,8 @@ import {
 } from '../lib/merkle'
 import type { SelectedTokenPerms } from '../App'
 import type { MorphoMarketItem } from '../hooks/useMorphoMarkets'
+import { useTokenList, resolveToken } from '../hooks/useTokenList'
+import { useLendingMeta, resolveLender } from '../hooks/useLendingMeta'
 
 interface Props {
   chainId: number
@@ -31,6 +33,9 @@ const OP_COLORS: Record<string, string> = {
 }
 
 export function MerklePanel({ chainId, selectedLenders, selectedTokenPerms, morphoMarkets, onRootChange }: Props) {
+  const { tokens } = useTokenList(chainId)
+  const { lenders } = useLendingMeta(chainId)
+
   const { leaves, root, proofs } = useMemo(() => {
     const allLeaves: GeneratedLeaf[] = []
     const cid = String(chainId)
@@ -155,15 +160,28 @@ export function MerklePanel({ chainId, selectedLenders, selectedTokenPerms, morp
       <div className="space-y-3 max-h-[50vh] overflow-y-auto">
         {Array.from(grouped.entries()).map(([groupKey, groupLeaves]) => {
           const first = groupLeaves[0]
-          const shortUnderlying = `${first.underlying.slice(0, 6)}...${first.underlying.slice(-4)}`
+          const lenderInfo = resolveLender(lenders, first.protocolId)
+          const assetInfo = resolveToken(tokens, first.underlying)
 
           return (
             <div key={groupKey} className="border border-gray-800 rounded-lg overflow-hidden">
-              <div className="px-3 py-2 bg-gray-900/80 border-b border-gray-800">
-                <span className="text-xs font-medium text-gray-400">
-                  {first.protocolId.replace(/_/g, ' ')}
+              <div className="px-3 py-2 bg-gray-900/80 border-b border-gray-800 flex items-center gap-2">
+                {lenderInfo.logoURI && (
+                  <img src={lenderInfo.logoURI} alt={lenderInfo.name} className="w-4 h-4 rounded-full" />
+                )}
+                <span className="text-xs font-medium text-gray-300">
+                  {lenderInfo.name}
                 </span>
-                <span className="text-xs text-gray-600 ml-2 font-mono">{shortUnderlying}</span>
+                <span className="text-gray-700 text-xs">|</span>
+                {assetInfo.logoURI && (
+                  <img src={assetInfo.logoURI} alt={assetInfo.symbol} className="w-4 h-4 rounded-full" />
+                )}
+                <span className="text-xs font-medium text-gray-400">
+                  {assetInfo.symbol}
+                </span>
+                <span className="text-xs text-gray-600 font-mono ml-auto" title={first.underlying}>
+                  {first.underlying.slice(0, 6)}...{first.underlying.slice(-4)}
+                </span>
               </div>
               <div className="divide-y divide-gray-800/50">
                 {groupLeaves.map((leaf, i) => (
@@ -173,7 +191,7 @@ export function MerklePanel({ chainId, selectedLenders, selectedTokenPerms, morp
                         {leaf.opName}
                       </span>
                       <span className="text-xs text-gray-500">
-                        lender: {leaf.lender}
+                        {resolveLender(lenders, leaf.protocolId).name}
                       </span>
                     </div>
                     <span className="text-xs font-mono text-gray-600 truncate max-w-[120px]" title={leaf.leaf}>
