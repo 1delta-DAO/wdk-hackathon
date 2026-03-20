@@ -33,7 +33,7 @@ const AAVE_ATOKEN     = '0x625E7708f30cA75bfd92586e17077590C60eb4cD' as const  /
 const AAVE_DEBT_TOKEN = '0xFCCf3cAbbe80101232d343252614b6A3eE81C989' as const  // varDebtUSDC
 const USDC            = '0xaf88d065e77c8cC2239327C5EDb3A432268e5831' as const
 const WETH            = '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1' as const
-const MORPHO_BLUE     = '0xBBBBBbbBBb9cC5e90e3b3Af64bdAF62C37EEFFCb' as const
+const MORPHO_BLUE     = '0x6c247b1F6182318877311737BaC0844bAa518F5e' as const  // Arbitrum Morpho Blue
 const MORPHO_ORACLE   = '0x1234567890123456789012345678901234567890' as const
 const MORPHO_IRM      = '0x870aC11D48B15DB9a138Cf899d20F13F79Ba00BC' as const
 
@@ -144,6 +144,7 @@ describe('buildSettlementTx', () => {
     debtAsset:           USDC,
     user:                MOCK_ORDER.signer,
     settlement:          SETTLEMENT,
+    morphoPool:          MORPHO_BLUE,     // Arbitrum Morpho Blue
     debtAmount:          1_000_000_000n,  // 1000 USDC (6 decimals)
   }
 
