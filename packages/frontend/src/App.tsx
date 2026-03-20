@@ -114,8 +114,9 @@ export default function App() {
           const morpho = MORPHO_BLUE_ADDRESSES[cid]
           if (morpho && morphoMarkets.length > 0) {
             for (const item of morphoMarkets) {
-              const mid = item.params.market.id
-              if (mid) {
+              const raw = item.params.market.id
+              const mid = raw && !raw.startsWith('0x') ? `0x${raw}` : raw
+              if (mid && mid.length === 66) {
                 conditions.push({
                   lenderId: protocolToLenderId(lender.id),
                   morpho,
