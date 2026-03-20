@@ -63,14 +63,15 @@ export const AaveDelegationTypedData = {
 /** Settlement order typed data */
 export const SettlementOrderTypedData = {
   types: {
-    MigrationOrder: [
+    InfiniteOrder: [
       { name: 'merkleRoot', type: 'bytes32' },
       { name: 'deadline', type: 'uint48' },
       { name: 'maxFeeBps', type: 'uint256' },
+      { name: 'solver', type: 'address' },
       { name: 'settlementData', type: 'bytes' },
     ],
   },
-  primaryType: 'MigrationOrder' as const,
+  primaryType: 'InfiniteOrder' as const,
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -174,6 +175,7 @@ export interface SettlementOrderMessage {
   merkleRoot: Hex
   deadline: number
   maxFeeBps: bigint
+  solver: Address
   settlementData: Hex
 }
 
@@ -181,12 +183,14 @@ export function buildSettlementOrderMessage(params: {
   merkleRoot: Hex
   deadline: number
   maxFeeBps?: number | bigint
+  solver?: Address
   settlementData?: Hex
 }): SettlementOrderMessage {
   return {
     merkleRoot: params.merkleRoot,
     deadline: params.deadline,
     maxFeeBps: BigInt(params.maxFeeBps ?? 0),
+    solver: params.solver ?? '0x0000000000000000000000000000000000000000',
     settlementData: params.settlementData ?? '0x',
   }
 }
@@ -259,7 +263,7 @@ export function settlementDomain(params: {
   settlement: Address
 }): TypedDataDomain {
   return {
-    name: params.name ?? 'MigrationSettlement',
+    name: params.name ?? 'InfiniteSettlement',
     version: '1',
     chainId: params.chainId,
     verifyingContract: params.settlement,
@@ -441,6 +445,7 @@ export const settleWithFlashLoanAbi = [{
     { name: 'flashLoanPool', type: 'address' },
     { name: 'poolId', type: 'uint8' },
     { name: 'maxFeeBps', type: 'uint256' },
+    { name: 'solver', type: 'address' },
     { name: 'deadline', type: 'uint48' },
     { name: 'signature', type: 'bytes' },
     { name: 'orderData', type: 'bytes' },

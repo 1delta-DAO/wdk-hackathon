@@ -99,13 +99,14 @@ abstract contract SettlementBase is
      */
     function settle(
         uint256 maxFeeBps,
+        address solver,
         uint48 deadline,
         bytes calldata signature,
         bytes calldata orderData,
         bytes calldata executionData,
         bytes calldata fillerCalldata
     ) external {
-        (address user,) = _verifyAndExtract(maxFeeBps, deadline, signature, orderData);
+        (address user,) = _verifyAndExtract(maxFeeBps, solver, deadline, signature, orderData);
         _executeSettlement(user, maxFeeBps, orderData, executionData, fillerCalldata);
     }
 
@@ -118,13 +119,14 @@ abstract contract SettlementBase is
         address flashLoanPool,
         uint8 poolId,
         uint256 maxFeeBps,
+        address solver,
         uint48 deadline,
         bytes calldata signature,
         bytes calldata orderData,
         bytes calldata executionData,
         bytes calldata fillerCalldata
     ) external {
-        (address user,) = _verifyAndExtract(maxFeeBps, deadline, signature, orderData);
+        (address user,) = _verifyAndExtract(maxFeeBps, solver, deadline, signature, orderData);
 
         // Callback layout: [20: user][1: poolId][8: maxFeeBps][2: orderLen][orderData][2: fillerLen][filler][executionData]
         uint256 paramsLen = 1 + 8 + 2 + orderData.length + 2 + fillerCalldata.length + executionData.length;
@@ -148,6 +150,7 @@ abstract contract SettlementBase is
 
     function _verifyAndExtract(
         uint256 maxFeeBps,
+        address solver,
         uint48 deadline,
         bytes calldata signature,
         bytes calldata orderData
@@ -164,7 +167,7 @@ abstract contract SettlementBase is
             mstore(0x40, add(add(fmp, 0x20), and(add(sLen, 31), not(31))))
         }
 
-        user = _recoverOrderSigner(merkleRoot, deadline, maxFeeBps, settlementData, signature);
+        user = _recoverOrderSigner(merkleRoot, deadline, maxFeeBps, solver, settlementData, signature);
     }
 
     // ── Intent: Oracle-Verified Swaps ────────────────────

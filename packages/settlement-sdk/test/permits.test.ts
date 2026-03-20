@@ -63,8 +63,8 @@ describe('typed data definitions', () => {
   })
 
   it('SettlementOrderTypedData has correct structure', () => {
-    expect(SettlementOrderTypedData.primaryType).toBe('MigrationOrder')
-    expect(SettlementOrderTypedData.types.MigrationOrder).toHaveLength(4)
+    expect(SettlementOrderTypedData.primaryType).toBe('InfiniteOrder')
+    expect(SettlementOrderTypedData.types.InfiniteOrder).toHaveLength(5)
   })
 })
 
@@ -178,7 +178,7 @@ describe('domain builders', () => {
 
   it('settlementDomain defaults name to MigrationSettlement', () => {
     const d = settlementDomain({ chainId: 1, settlement: SETTLEMENT })
-    expect(d.name).toBe('MigrationSettlement')
+    expect(d.name).toBe('InfiniteSettlement')
   })
 
   it('settlementDomain accepts custom name', () => {

@@ -100,8 +100,8 @@ contract MigrationSettlementTest is Test {
     address constant RECEIVER = address(0xBEEF);
 
     // EIP-712 signing helpers
-    bytes32 constant MIGRATION_ORDER_TYPEHASH =
-        keccak256("MigrationOrder(bytes32 merkleRoot,uint48 deadline,uint256 maxFeeBps,bytes settlementData)");
+    bytes32 constant INFINITE_ORDER_TYPEHASH =
+        keccak256("InfiniteOrder(bytes32 merkleRoot,uint48 deadline,uint256 maxFeeBps,address solver,bytes settlementData)");
 
     address userAddr;
     uint256 userPk;
@@ -121,11 +121,12 @@ contract MigrationSettlementTest is Test {
         bytes32 merkleRoot,
         uint48 deadline,
         uint256 maxFeeBps,
+        address solver,
         bytes memory settlementData
     ) internal view returns (bytes memory) {
         bytes32 domainSeparator = harness.DOMAIN_SEPARATOR();
         bytes32 structHash = keccak256(
-            abi.encode(MIGRATION_ORDER_TYPEHASH, merkleRoot, deadline, maxFeeBps, keccak256(settlementData))
+            abi.encode(INFINITE_ORDER_TYPEHASH, merkleRoot, deadline, maxFeeBps, solver, keccak256(settlementData))
         );
         bytes32 digest = keccak256(abi.encodePacked("\x19\x01", domainSeparator, structHash));
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(pk, digest);
@@ -286,7 +287,7 @@ contract MigrationSettlementTest is Test {
         MigrationFixture memory f = _buildMigration(_settlementData());
 
         uint48 deadline = uint48(block.timestamp + 1 hours);
-        bytes memory sig = _signOrder(userPk, f.root, deadline, 0, f.settlement);
+        bytes memory sig = _signOrder(userPk, f.root, deadline, 0, address(0), f.settlement);
 
         harness.runMigration(
             DEBT_ASSET,
@@ -317,7 +318,7 @@ contract MigrationSettlementTest is Test {
         MigrationFixture memory f = _buildMigration(_settlementData());
 
         uint48 deadline = uint48(block.timestamp - 1);
-        bytes memory sig = _signOrder(userPk, f.root, deadline, 0, f.settlement);
+        bytes memory sig = _signOrder(userPk, f.root, deadline, 0, address(0), f.settlement);
 
         vm.expectRevert(EIP712OrderVerifier.OrderExpired.selector);
         harness.runMigration(

@@ -96,8 +96,8 @@ contract AaveToMorphoMigrationTest is Test {
     address constant STETH = 0xae7ab96520DE3A18E5e111B5EaAb095312D7fE84;
 
     // EIP-712
-    bytes32 constant MIGRATION_ORDER_TYPEHASH =
-        keccak256("MigrationOrder(bytes32 merkleRoot,uint48 deadline,uint256 maxFeeBps,bytes settlementData)");
+    bytes32 constant INFINITE_ORDER_TYPEHASH =
+        keccak256("InfiniteOrder(bytes32 merkleRoot,uint48 deadline,uint256 maxFeeBps,address solver,bytes settlementData)");
 
     Settlement settlement;
 
@@ -146,11 +146,12 @@ contract AaveToMorphoMigrationTest is Test {
         bytes32 merkleRoot,
         uint48 deadline,
         uint256 maxFeeBps,
+        address solver,
         bytes memory settlementData
     ) internal view returns (bytes memory) {
         bytes32 domainSeparator = settlement.DOMAIN_SEPARATOR();
         bytes32 structHash = keccak256(
-            abi.encode(MIGRATION_ORDER_TYPEHASH, merkleRoot, deadline, maxFeeBps, keccak256(settlementData))
+            abi.encode(INFINITE_ORDER_TYPEHASH, merkleRoot, deadline, maxFeeBps, solver, keccak256(settlementData))
         );
         bytes32 digest = keccak256(abi.encodePacked("\x19\x01", domainSeparator, structHash));
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(pk, digest);
@@ -293,7 +294,7 @@ contract AaveToMorphoMigrationTest is Test {
 
         // ── Sign and execute ──
         uint48 deadline = uint48(block.timestamp + 1 hours);
-        bytes memory sig = _signOrder(userPk, root, deadline, 0, settlementPayload);
+        bytes memory sig = _signOrder(userPk, root, deadline, 0, address(0), settlementPayload);
 
         settlement.settleWithFlashLoan(
             WETH,
@@ -301,6 +302,7 @@ contract AaveToMorphoMigrationTest is Test {
             MORPHO_BLUE,       // flash loan source
             0,                 // poolId
             0,                 // maxFeeBps = 0 (fee-free)
+            address(0),        // solver (permissionless)
             deadline,
             sig,
             orderData,
@@ -482,7 +484,7 @@ contract AaveToMorphoMigrationTest is Test {
         pr3[0] = l2; pr3[1] = h01;
 
         bytes memory orderData = abi.encodePacked(root, uint16(0));
-        bytes memory sig = _signOrder(userPk, root, deadline, 0, hex"");
+        bytes memory sig = _signOrder(userPk, root, deadline, 0, address(0), hex"");
 
         bytes memory executionData = abi.encodePacked(
             uint8(2), uint8(2), address(0),
@@ -513,7 +515,7 @@ contract AaveToMorphoMigrationTest is Test {
         // 3. Execute the migration
         calls[idx++] = abi.encodeCall(
             settlement.settleWithFlashLoan,
-            (WETH, aaveDebtBefore, MORPHO_BLUE, 0, 0, deadline, sig, orderData, executionData, hex"")
+            (WETH, aaveDebtBefore, MORPHO_BLUE, 0, 0, address(0), deadline, sig, orderData, executionData, hex"")
         );
 
         // ── Execute multicall (solver submits single tx) ──

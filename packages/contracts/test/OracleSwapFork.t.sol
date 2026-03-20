@@ -152,8 +152,8 @@ contract OracleSwapSettlementForkTest is Test {
     address constant WBTC          = 0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599;
 
     // EIP-712
-    bytes32 constant MIGRATION_ORDER_TYPEHASH =
-        keccak256("MigrationOrder(bytes32 merkleRoot,uint48 deadline,uint256 maxFeeBps,bytes settlementData)");
+    bytes32 constant INFINITE_ORDER_TYPEHASH =
+        keccak256("InfiniteOrder(bytes32 merkleRoot,uint48 deadline,uint256 maxFeeBps,address solver,bytes settlementData)");
 
     Settlement settlement;
     AaveOracleAdapter oracleAdapter;
@@ -204,11 +204,12 @@ contract OracleSwapSettlementForkTest is Test {
         bytes32 merkleRoot,
         uint48 deadline,
         uint256 maxFeeBps,
+        address solver,
         bytes memory settlementPayload
     ) internal view returns (bytes memory) {
         bytes32 domainSeparator = settlement.DOMAIN_SEPARATOR();
         bytes32 structHash = keccak256(
-            abi.encode(MIGRATION_ORDER_TYPEHASH, merkleRoot, deadline, maxFeeBps, keccak256(settlementPayload))
+            abi.encode(INFINITE_ORDER_TYPEHASH, merkleRoot, deadline, maxFeeBps, solver, keccak256(settlementPayload))
         );
         bytes32 digest = keccak256(abi.encodePacked("\x19\x01", domainSeparator, structHash));
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(pk, digest);
@@ -336,12 +337,13 @@ contract OracleSwapSettlementForkTest is Test {
 
         // ── Sign and execute ──
         uint48 deadline = uint48(block.timestamp + 1 hours);
-        bytes memory sig = _signOrder(userPk, root, deadline, 0, settlementPayload);
+        bytes memory sig = _signOrder(userPk, root, deadline, 0, address(0), settlementPayload);
 
         console.log("fillerCalldata length:", fillerCalldata.length);
         console.log("swapCalldata length:", swapCalldata.length);
         settlement.settle(
             0,                  // maxFeeBps = 0 (no fee)
+            address(0),         // solver (permissionless)
             deadline,
             sig,
             orderData,
@@ -412,10 +414,10 @@ contract OracleSwapSettlementForkTest is Test {
             = _buildDebtSwap(vDebtUSDC, swapAll, userDebt);
 
         uint48 deadline = uint48(block.timestamp + 1 hours);
-        bytes memory sig = _signOrder(userPk, merkleRoot, deadline, 0, settlementPayload);
+        bytes memory sig = _signOrder(userPk, merkleRoot, deadline, 0, address(0), settlementPayload);
 
         settlement.settleWithFlashLoan(
-            USDC, userDebt, MORPHO_BLUE, 0, 0, deadline, sig, orderData, executionData, fillerCalldata
+            USDC, userDebt, MORPHO_BLUE, 0, 0, address(0), deadline, sig, orderData, executionData, fillerCalldata
         );
 
         uint256 aWethAfter = IERC20(aWETH).balanceOf(user);
@@ -575,10 +577,10 @@ contract OracleSwapSettlementForkTest is Test {
         }
 
         uint48 deadline = uint48(block.timestamp + 1 hours);
-        bytes memory sig = _signOrder(userPk, merkleRoot, deadline, 0, settlementPayload);
+        bytes memory sig = _signOrder(userPk, merkleRoot, deadline, 0, address(0), settlementPayload);
 
         settlement.settleWithFlashLoan(
-            USDC, userDebt, MORPHO_BLUE, 0, 0, deadline, sig, orderData, executionData, fillerCalldata
+            USDC, userDebt, MORPHO_BLUE, 0, 0, address(0), deadline, sig, orderData, executionData, fillerCalldata
         );
 
         uint256 aWethAfter = IERC20(aWETH).balanceOf(user);
