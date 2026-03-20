@@ -46,10 +46,10 @@ function getDeadline(): bigint {
   return BigInt(Math.floor(Date.now() / 1000) + 3600)
 }
 
-export function usePermitSignatures(settlementAddress: Address) {
+export function usePermitSignatures(settlementAddress: Address, chainId?: number) {
   const { address } = useAccount()
-  const publicClient = usePublicClient()
-  const { data: walletClient } = useWalletClient()
+  const publicClient = usePublicClient({ chainId })
+  const { data: walletClient } = useWalletClient({ chainId })
 
   const [signedPermissions, setSignedPermissions] = useState<SignedPermission[]>([])
   const [signing, setSigning] = useState<string | null>(null)

@@ -67,6 +67,7 @@ export default function App() {
   const [allLeaves, setAllLeaves] = useState<GeneratedLeaf[]>([])
 
   const activeChainId = selectedChainId ?? connectedChainId
+  const chainMismatch = isConnected && activeChainId != null && connectedChainId !== activeChainId
   const settlementAddress = activeChainId ? (SETTLEMENT_ADDRESSES[activeChainId] ?? '0x0000000000000000000000000000000000000001' as Address) : '0x0000000000000000000000000000000000000001' as Address
 
   const lenders = useMemo(
@@ -150,7 +151,7 @@ export default function App() {
     if (orderData) void navigator.clipboard.writeText(orderData)
   }, [orderData])
 
-  const { signPermission, signedPermissions, signing, error, clearSignatures } = usePermitSignatures(settlementAddress)
+  const { signPermission, signedPermissions, signing, error, clearSignatures } = usePermitSignatures(settlementAddress, activeChainId ?? undefined)
 
   const {
     submitOrder,
@@ -236,6 +237,15 @@ export default function App() {
           <ConnectButton />
         </div>
       </nav>
+
+      {chainMismatch && (
+        <div className="alert alert-warning rounded-none py-1.5 px-3 text-xs flex items-center justify-between">
+          <span>Wallet is on a different chain. Switch to continue.</span>
+          <button className="btn btn-xs btn-warning" onClick={() => switchChain({ chainId: activeChainId! })}>
+            Switch wallet
+          </button>
+        </div>
+      )}
 
       <main className="flex-1 p-3">
         <div className="max-w-7xl mx-auto space-y-3">

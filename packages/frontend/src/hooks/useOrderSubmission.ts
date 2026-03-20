@@ -35,7 +35,7 @@ interface SubmittedOrder {
 
 export function useOrderSubmission(chainId: number | null) {
   const { address } = useAccount()
-  const { data: walletClient } = useWalletClient()
+  const { data: walletClient } = useWalletClient({ chainId: chainId ?? undefined })
   const [submitting, setSubmitting] = useState(false)
   const [submitted, setSubmitted] = useState<SubmittedOrder | null>(null)
   const [error, setError] = useState<string | null>(null)
