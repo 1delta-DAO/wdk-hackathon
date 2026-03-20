@@ -1,20 +1,25 @@
 import { useEffect, useMemo } from 'react'
 import type { Address, Hex } from 'viem'
 import type { LenderProtocol } from '../data/lenders'
-import { AAVE_POOLS, COMPOUND_V3_POOLS, getAaveTokenPermissions } from '../data/lenders'
+import { AAVE_POOLS, COMPOUND_V3_POOLS, MORPHO_BLUE_ADDRESSES, getAaveTokenPermissions } from '../data/lenders'
 import {
   buildAaveLeavesForToken,
   buildCompoundV3LeavesForComet,
+  buildMorphoLeavesForMarket,
   buildMerkleTree,
   protocolToLenderId,
+  LENDER_ID_MORPHO,
   type GeneratedLeaf,
+  type MorphoMarketParams,
 } from '../lib/merkle'
 import type { SelectedTokenPerms } from '../App'
+import type { MorphoMarketItem } from '../hooks/useMorphoMarkets'
 
 interface Props {
   chainId: number
   selectedLenders: LenderProtocol[]
   selectedTokenPerms: SelectedTokenPerms
+  morphoMarkets?: MorphoMarketItem[]
   onRootChange?: (root: Hex | null, leaves?: GeneratedLeaf[]) => void
 }
 
@@ -25,7 +30,7 @@ const OP_COLORS: Record<string, string> = {
   Withdraw: 'text-purple-400 bg-purple-500/10',
 }
 
-export function MerklePanel({ chainId, selectedLenders, selectedTokenPerms, onRootChange }: Props) {
+export function MerklePanel({ chainId, selectedLenders, selectedTokenPerms, morphoMarkets, onRootChange }: Props) {
   const { leaves, root, proofs } = useMemo(() => {
     const allLeaves: GeneratedLeaf[] = []
     const cid = String(chainId)
@@ -72,6 +77,27 @@ export function MerklePanel({ chainId, selectedLenders, selectedTokenPerms, onRo
           lenderId: protocolToLenderId(lender.id),
         })
         allLeaves.push(...c3Leaves)
+      } else if (lender.family === 'MORPHO_BLUE' && morphoMarkets && morphoMarkets.length > 0) {
+        const morpho = MORPHO_BLUE_ADDRESSES[cid]
+        if (!morpho) continue
+
+        for (const item of morphoMarkets) {
+          const mp = item.params.market
+          const market: MorphoMarketParams = {
+            loanToken: mp.loanAddress as Address,
+            collateralToken: mp.collateralAddress as Address,
+            oracle: mp.oracle as Address,
+            irm: mp.irm as Address,
+            lltv: BigInt(mp.lltv),
+          }
+          const morphoLeaves = buildMorphoLeavesForMarket({
+            protocolId: item.lenderKey,
+            market,
+            morpho,
+            lenderId: LENDER_ID_MORPHO,
+          })
+          allLeaves.push(...morphoLeaves)
+        }
       }
     }
 
@@ -83,7 +109,7 @@ export function MerklePanel({ chainId, selectedLenders, selectedTokenPerms, onRo
     const tree = buildMerkleTree(leafHashes)
 
     return { leaves: allLeaves, root: tree.root, proofs: tree.proofs }
-  }, [chainId, selectedLenders, selectedTokenPerms])
+  }, [chainId, selectedLenders, selectedTokenPerms, morphoMarkets])
 
   useEffect(() => {
     onRootChange?.(root ?? null, leaves.length > 0 ? leaves : undefined)
@@ -92,7 +118,7 @@ export function MerklePanel({ chainId, selectedLenders, selectedTokenPerms, onRo
   if (leaves.length === 0) {
     return (
       <div className="text-gray-500 text-sm py-8 text-center">
-        Select Aave tokens or Compound V3 markets to auto-generate merkle leaves
+        Select Aave tokens, Compound V3 markets, or Morpho markets to auto-generate merkle leaves
       </div>
     )
   }

@@ -13,3 +13,7 @@ export const ORACLE_ADDRESSES: Record<number, Address> = {
 /** Order backend URL */
 export const ORDER_BACKEND_URL = import.meta.env.VITE_ORDER_BACKEND_URL as string
   || 'http://localhost:8787'
+
+/** Portal proxy URL (proxies https://portal.1delta.io with API key auth) */
+export const PORTAL_PROXY_URL = import.meta.env.VITE_PORTAL_PROXY_URL as string
+  || 'http://localhost:8788'

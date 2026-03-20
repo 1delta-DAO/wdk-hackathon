@@ -1,4 +1,4 @@
-import { keccak256, encodePacked, type Hex, type Address } from 'viem'
+import { keccak256, encodePacked, concatHex, type Hex, type Address } from 'viem'
 
 // ── Lender ID ranges (must match DeltaEnums.sol) ────────────
 
@@ -298,9 +298,112 @@ export function buildCompoundV3LeavesForComet(input: CompoundV3LeafInput): Gener
   return leaves
 }
 
+// ── Morpho lender data builders ─────────────────────────────
+
+export interface MorphoMarketParams {
+  loanToken: Address
+  collateralToken: Address
+  oracle: Address
+  irm: Address
+  lltv: bigint
+}
+
+export const MorphoData = {
+  /** BORROW / WITHDRAW data: [20: loan][20: coll][20: oracle][20: irm][16: lltv][1: flags][20: morpho] */
+  borrowOrWithdraw(market: MorphoMarketParams, morpho: Address, flags: number = 0): Hex {
+    return encodePacked(
+      ['address', 'address', 'address', 'address', 'uint128', 'uint8', 'address'],
+      [market.loanToken, market.collateralToken, market.oracle, market.irm, market.lltv, flags, morpho],
+    )
+  },
+
+  /** DEPOSIT / REPAY data: [20: loan][20: coll][20: oracle][20: irm][16: lltv][1: flags][20: morpho][2: cbLen][cbData] */
+  depositOrRepay(market: MorphoMarketParams, morpho: Address, flags: number = 0, callbackData: Hex = '0x'): Hex {
+    const cbLen = callbackData === '0x' ? 0 : (callbackData.length - 2) / 2
+    const base = encodePacked(
+      ['address', 'address', 'address', 'address', 'uint128', 'uint8', 'address', 'uint16'],
+      [market.loanToken, market.collateralToken, market.oracle, market.irm, market.lltv, flags, morpho, cbLen],
+    )
+    if (cbLen === 0) return base
+    return concatHex([base, callbackData])
+  },
+}
+
+export interface MorphoLeafInput {
+  protocolId: string
+  market: MorphoMarketParams
+  morpho: Address
+  lenderId: number
+}
+
+/** Generate all 4 operation leaves for a Morpho market */
+export function buildMorphoLeavesForMarket(input: MorphoLeafInput): GeneratedLeaf[] {
+  const { protocolId, market, morpho, lenderId } = input
+  const leaves: GeneratedLeaf[] = []
+
+  // DEPOSIT
+  const depositData = MorphoData.depositOrRepay(market, morpho)
+  leaves.push({
+    leaf: buildLeaf({ op: LenderOps.DEPOSIT, lender: lenderId, data: depositData }),
+    op: LenderOps.DEPOSIT,
+    opName: 'Deposit',
+    lender: lenderId,
+    protocolId,
+    underlying: market.loanToken,
+    tokenAddress: morpho,
+    tokenType: 'pool',
+    data: depositData,
+  })
+
+  // BORROW
+  const borrowData = MorphoData.borrowOrWithdraw(market, morpho)
+  leaves.push({
+    leaf: buildLeaf({ op: LenderOps.BORROW, lender: lenderId, data: borrowData }),
+    op: LenderOps.BORROW,
+    opName: 'Borrow',
+    lender: lenderId,
+    protocolId,
+    underlying: market.loanToken,
+    tokenAddress: morpho,
+    tokenType: 'pool',
+    data: borrowData,
+  })
+
+  // REPAY
+  const repayData = MorphoData.depositOrRepay(market, morpho)
+  leaves.push({
+    leaf: buildLeaf({ op: LenderOps.REPAY, lender: lenderId, data: repayData }),
+    op: LenderOps.REPAY,
+    opName: 'Repay',
+    lender: lenderId,
+    protocolId,
+    underlying: market.loanToken,
+    tokenAddress: morpho,
+    tokenType: 'pool',
+    data: repayData,
+  })
+
+  // WITHDRAW
+  const withdrawData = MorphoData.borrowOrWithdraw(market, morpho)
+  leaves.push({
+    leaf: buildLeaf({ op: LenderOps.WITHDRAW, lender: lenderId, data: withdrawData }),
+    op: LenderOps.WITHDRAW,
+    opName: 'Withdraw',
+    lender: lenderId,
+    protocolId,
+    underlying: market.loanToken,
+    tokenAddress: morpho,
+    tokenType: 'pool',
+    data: withdrawData,
+  })
+
+  return leaves
+}
+
 /** Map protocol ID to lender ID range */
 export function protocolToLenderId(protocolId: string): number {
   if (protocolId === 'AAVE_V2') return LENDER_ID_AAVE_V2
   if (protocolId.startsWith('COMPOUND_V3_')) return LENDER_ID_COMPOUND_V3
+  if (protocolId.startsWith('MORPHO_BLUE') || protocolId === 'MORPHO_BLUE') return LENDER_ID_MORPHO
   return LENDER_ID_AAVE_V3
 }

@@ -16,6 +16,7 @@ import {
 } from './data/lenders'
 import { usePermitSignatures } from './hooks/usePermitSignatures'
 import { useOrderSubmission } from './hooks/useOrderSubmission'
+import { useMorphoMarkets } from './hooks/useMorphoMarkets'
 import { protocolToLenderId, type GeneratedLeaf } from './lib/merkle'
 import { SETTLEMENT_ADDRESSES } from './config/settlements'
 import {
@@ -49,6 +50,8 @@ export default function App() {
     () => (activeChainId ? getLendersForChain(activeChainId) : []),
     [activeChainId],
   )
+
+  const { markets: morphoMarkets, loading: morphoLoading } = useMorphoMarkets(activeChainId)
 
   const selectedLenders = useMemo(
     () => lenders.filter((l) => selectedLenderIds.has(l.id)),
@@ -285,8 +288,22 @@ export default function App() {
                     </div>
                   </div>
                 ) : selectedLenders.length > 0 ? (
-                  <div className="text-gray-500 text-sm py-8 text-center">
-                    Compound V3 and Morpho permissions don't require token selection
+                  <div className="space-y-3">
+                    {selectedLenders.some(l => l.family === 'MORPHO_BLUE') && (
+                      <div className="rounded-lg border border-gray-800 bg-gray-900/50 px-4 py-3">
+                        <div className="text-sm text-gray-300 font-medium">
+                          Morpho Markets
+                        </div>
+                        <div className="text-xs text-gray-500 mt-1">
+                          {morphoLoading
+                            ? 'Loading markets...'
+                            : `${morphoMarkets.length} market${morphoMarkets.length !== 1 ? 's' : ''} found (TVL > $100k)`}
+                        </div>
+                      </div>
+                    )}
+                    <div className="text-gray-500 text-sm py-4 text-center">
+                      Compound V3 and Morpho permissions don't require token selection
+                    </div>
                   </div>
                 ) : null}
               </section>
@@ -411,6 +428,7 @@ export default function App() {
                 chainId={activeChainId}
                 selectedLenders={selectedLenders}
                 selectedTokenPerms={selectedTokenPerms}
+                morphoMarkets={morphoMarkets}
                 onRootChange={handleRootChange}
               />
 
