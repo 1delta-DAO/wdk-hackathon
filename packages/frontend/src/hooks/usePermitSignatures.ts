@@ -199,13 +199,24 @@ export function usePermitSignatures(settlementAddress: Address) {
         }
 
         case 'AAVE_DELEGATION': {
-          nonce = await publicClient.readContract({
-            address: request.targetAddress,
-            abi: _noncesAbi,
-            functionName: '_nonces',
-            args: [address],
-          })
-
+          // Aave V3 newer deployments use `nonces` (ERC-2612 style);
+          // older V3 deployments exposed `_nonces` via mapping auto-getter.
+          try {
+            nonce = await publicClient.readContract({
+              address: request.targetAddress,
+              abi: noncesAbi,
+              functionName: 'nonces',
+              args: [address],
+            })
+          } catch {
+            nonce = await publicClient.readContract({
+              address: request.targetAddress,
+              abi: _noncesAbi,
+              functionName: '_nonces',
+              args: [address],
+            })
+          }
+          
           const debtTokenName = request.extra?.tokenName ?? await publicClient.readContract({
             address: request.targetAddress,
             abi: nameAbi,
