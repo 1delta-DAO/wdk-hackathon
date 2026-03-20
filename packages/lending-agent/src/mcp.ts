@@ -1,7 +1,7 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import type { Tool } from '@modelcontextprotocol/sdk/types.js'
-import type { Tool as AnthropicTool } from '@anthropic-ai/sdk/resources/messages.js'
+import type { GenericTool } from './providers/index.js'
 import { ONEDELTA_MCP_URL, RESULT_CHAR_LIMIT } from './config.js'
 
 export type ToolRouter = (toolName: string, input: Record<string, unknown>) => Promise<string>
@@ -71,13 +71,13 @@ export async function callTool (client: Client, name: string, input: Record<stri
   return truncate(extractText(result.content as McpContent))
 }
 
-// ── Anthropic tool format conversion ─────────────────────────────────────────
+// ── Generic tool format conversion ────────────────────────────────────────────
 
-export function toAnthropicTools (mcpTools: Tool[]): AnthropicTool[] {
+export function toGenericTools (mcpTools: Tool[]): GenericTool[] {
   return mcpTools.map(t => ({
     name: t.name,
     description: t.description ?? '',
-    input_schema: t.inputSchema as AnthropicTool['input_schema']
+    inputSchema: t.inputSchema as Record<string, unknown>,
   }))
 }
 

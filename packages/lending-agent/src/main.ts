@@ -1,7 +1,7 @@
-import type Anthropic from '@anthropic-ai/sdk'
 import { CONTRACTS_BY_CHAIN } from './config.js'
-import { callTool, toAnthropicTools, createRouter } from './mcp.js'
+import { callTool, toGenericTools, createRouter } from './mcp.js'
 import type { LocalHandler } from './mcp.js'
+import type { GenericTool } from './providers/index.js'
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { buildSettlementSystemPrompt } from './prompt.js'
 import { runAgentLoop } from './agent.js'
@@ -94,11 +94,11 @@ export async function runSettlementFlow(
     return 'Migration proposal recorded. Proceeding to build and submit settlement transaction.'
   }
 
-  const proposeMigrationTool: Anthropic.Tool = {
+  const proposeMigrationTool: GenericTool = {
     name: 'propose_migration',
     description: 'Submit the chosen migration once you have determined the best source→dest option. Call this exactly once.',
-    input_schema: {
-      type: 'object' as const,
+    inputSchema: {
+      type: 'object',
       properties: {
         sourceRepayLeafIndex:    { type: 'number',  description: 'Index of the REPAY leaf for the source protocol' },
         sourceWithdrawLeafIndex: { type: 'number',  description: 'Index of the WITHDRAW leaf for the source protocol' },
@@ -126,9 +126,9 @@ export async function runSettlementFlow(
   }
 
   // ── Run agent ────────────────────────────────────────────
-  const allTools: Anthropic.Tool[] = [
-    ...toAnthropicTools(filteredOneDelta),
-    ...toAnthropicTools(filteredWdk),
+  const allTools: GenericTool[] = [
+    ...toGenericTools(filteredOneDelta),
+    ...toGenericTools(filteredWdk),
     proposeMigrationTool,
   ]
 
@@ -136,13 +136,7 @@ export async function runSettlementFlow(
   const userMessage = `Analyze the available leaves for order ${orderId} on chain ${chainId} and find the best migration to execute.`
 
   const router = createRouter(toolClientMap, { propose_migration: proposeMigration })
-  const messages: Anthropic.MessageParam[] = [{ role: 'user', content: userMessage }]
-  const finalResponse = await runAgentLoop(router, systemPrompt, allTools, messages)
-
-  const resultText = finalResponse.content
-    .filter((b): b is Anthropic.TextBlock => b.type === 'text')
-    .map(b => b.text)
-    .join('')
+  const resultText = await runAgentLoop(router, systemPrompt, allTools, userMessage)
 
   console.log('\n=== Agent Result ===')
   console.log(resultText)
