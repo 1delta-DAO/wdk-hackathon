@@ -5,11 +5,12 @@ import { SETTLEMENT_ADDRESSES, ORDER_BACKEND_URL } from '../config/settlements'
 import type { GeneratedLeaf } from '../lib/merkle'
 
 // EIP-712 typed data for settlement orders
-const MIGRATION_ORDER_TYPES = {
-  MigrationOrder: [
+const INFINITE_ORDER_TYPES = {
+  InfiniteOrder: [
     { name: 'merkleRoot', type: 'bytes32' },
     { name: 'deadline', type: 'uint48' },
     { name: 'maxFeeBps', type: 'uint256' },
+    { name: 'solver', type: 'address' },
     { name: 'settlementData', type: 'bytes' },
   ],
 } as const
@@ -23,6 +24,8 @@ interface SubmitOrderParams {
   deadlineSeconds?: number
   /** Max fee in sub-basis-points (default: 0) */
   maxFeeBps?: number
+  /** Restrict to specific solver address (default: address(0) = permissionless) */
+  solver?: `0x${string}`
 }
 
 interface SubmittedOrder {
@@ -52,21 +55,23 @@ export function useOrderSubmission(chainId: number | null) {
     try {
       const deadline = Math.floor(Date.now() / 1000) + (params.deadlineSeconds ?? 3600)
       const maxFeeBps = params.maxFeeBps ?? 0
+      const solver = params.solver ?? '0x0000000000000000000000000000000000000000'
 
       // Sign the EIP-712 order
       const signature = await walletClient.signTypedData({
         domain: {
-          name: 'MigrationSettlement',
+          name: 'InfiniteSettlement',
           version: '1',
           chainId,
           verifyingContract: settlementAddress,
         },
-        types: MIGRATION_ORDER_TYPES,
-        primaryType: 'MigrationOrder',
+        types: INFINITE_ORDER_TYPES,
+        primaryType: 'InfiniteOrder',
         message: {
           merkleRoot: params.merkleRoot,
           deadline,
           maxFeeBps: BigInt(maxFeeBps),
+          solver,
           settlementData: params.settlementData,
         },
       })
@@ -90,6 +95,7 @@ export function useOrderSubmission(chainId: number | null) {
           fillerCalldata: '0x' as Hex,
           chainId,
           maxFeeBps,
+          solver,
           leaves: backendLeaves,
         },
         signature,

@@ -178,6 +178,7 @@ export function buildSettlementTx(input: SettlementInput): {
       MORPHO_BLUE,
       0,                                       // poolId 0 = Morpho Blue
       BigInt(input.order.order.maxFeeBps),
+      (input.order.order as any).solver ?? '0x0000000000000000000000000000000000000000',
       input.order.order.deadline,
       input.order.signature,
       input.order.order.orderData,             // signed by user, used as-is

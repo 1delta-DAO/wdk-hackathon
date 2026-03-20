@@ -45,8 +45,8 @@ contract SettlementDeltaForkTest is Test {
     address constant USDC          = 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48;
 
     // EIP-712
-    bytes32 constant MIGRATION_ORDER_TYPEHASH =
-        keccak256("MigrationOrder(bytes32 merkleRoot,uint48 deadline,uint256 maxFeeBps,bytes settlementData)");
+    bytes32 constant INFINITE_ORDER_TYPEHASH =
+        keccak256("InfiniteOrder(bytes32 merkleRoot,uint48 deadline,uint256 maxFeeBps,address solver,bytes settlementData)");
 
     Settlement settlement;
 
@@ -102,11 +102,12 @@ contract SettlementDeltaForkTest is Test {
         bytes32 merkleRoot,
         uint48 deadline,
         uint256 maxFeeBps,
+        address solver,
         bytes memory settlementPayload
     ) internal view returns (bytes memory) {
         bytes32 domainSeparator = settlement.DOMAIN_SEPARATOR();
         bytes32 structHash = keccak256(
-            abi.encode(MIGRATION_ORDER_TYPEHASH, merkleRoot, deadline, maxFeeBps, keccak256(settlementPayload))
+            abi.encode(INFINITE_ORDER_TYPEHASH, merkleRoot, deadline, maxFeeBps, solver, keccak256(settlementPayload))
         );
         bytes32 digest = keccak256(abi.encodePacked("\x19\x01", domainSeparator, structHash));
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(pk, digest);
@@ -115,7 +116,7 @@ contract SettlementDeltaForkTest is Test {
 
     // ── Migration builder ────────────────────────────────────
 
-    struct MigrationOrder {
+    struct InfiniteOrder {
         bytes32 root;
         bytes orderData;
         bytes executionData;
@@ -128,7 +129,7 @@ contract SettlementDeltaForkTest is Test {
         address aTokenSrc,
         address debtTokenSrc,
         uint256 flashLoanAmount
-    ) internal view returns (MigrationOrder memory o) {
+    ) internal view returns (InfiniteOrder memory o) {
         bytes memory repayData    = abi.encodePacked(uint8(2), debtTokenSrc, sourcePool);
         bytes memory withdrawData = abi.encodePacked(aTokenSrc, sourcePool);
         bytes memory depositData  = abi.encodePacked(destPool);
@@ -246,12 +247,12 @@ contract SettlementDeltaForkTest is Test {
         console.log("Core  aWETH balance :", IERC20(aWETH_dst).balanceOf(user));
         console.log("Core  USDC debt     :", IERC20(vDebtUSDC_dst).balanceOf(user));
 
-        MigrationOrder memory o = _buildMigration(
+        InfiniteOrder memory o = _buildMigration(
             AAVE_V3_PRIME, AAVE_V3_CORE, aWETH_src, vDebtUSDC_src, flashLoanAmount
         );
 
         uint48 deadline = uint48(block.timestamp + 1 hours);
-        bytes memory sig = _signOrder(userPk, o.root, deadline, 0, o.settlementPayload);
+        bytes memory sig = _signOrder(userPk, o.root, deadline, 0, address(0), o.settlementPayload);
 
         settlement.settleWithFlashLoan(
             USDC,
@@ -259,6 +260,7 @@ contract SettlementDeltaForkTest is Test {
             MORPHO_BLUE,
             0,
             0, // maxFee
+            address(0), // solver (permissionless)
             deadline,
             sig,
             o.orderData,
@@ -298,16 +300,16 @@ contract SettlementDeltaForkTest is Test {
         _grantPermissions();
 
         uint256 flashLoanAmount = IERC20(vDebtUSDC_src).balanceOf(user);
-        MigrationOrder memory o = _buildMigration(
+        InfiniteOrder memory o = _buildMigration(
             AAVE_V3_PRIME, AAVE_V3_CORE, aWETH_src, vDebtUSDC_src, flashLoanAmount
         );
 
         uint48 deadline = uint48(block.timestamp - 1); // expired
-        bytes memory sig = _signOrder(userPk, o.root, deadline, 0, o.settlementPayload);
+        bytes memory sig = _signOrder(userPk, o.root, deadline, 0, address(0), o.settlementPayload);
 
         vm.expectRevert(EIP712OrderVerifier.OrderExpired.selector);
         settlement.settleWithFlashLoan(
-            USDC, flashLoanAmount, MORPHO_BLUE, 0, 0, deadline, sig,
+            USDC, flashLoanAmount, MORPHO_BLUE, 0, 0, address(0), deadline, sig,
             o.orderData, o.executionData, hex""
         );
     }
@@ -324,19 +326,19 @@ contract SettlementDeltaForkTest is Test {
         _grantPermissions();
 
         uint256 flashLoanAmount = IERC20(vDebtUSDC_src).balanceOf(user);
-        MigrationOrder memory o = _buildMigration(
+        InfiniteOrder memory o = _buildMigration(
             AAVE_V3_PRIME, AAVE_V3_CORE, aWETH_src, vDebtUSDC_src, flashLoanAmount
         );
 
         // Sign with a different key — recovered signer won't have the approvals
         (, uint256 wrongPk) = makeAddrAndKey("attacker");
         uint48 deadline = uint48(block.timestamp + 1 hours);
-        bytes memory sig = _signOrder(wrongPk, o.root, deadline, 0, o.settlementPayload);
+        bytes memory sig = _signOrder(wrongPk, o.root, deadline, 0, address(0), o.settlementPayload);
 
         // The wrong signer has no aToken approval → the lending op will revert
         vm.expectRevert();
         settlement.settleWithFlashLoan(
-            USDC, flashLoanAmount, MORPHO_BLUE, 0, 0, deadline, sig,
+            USDC, flashLoanAmount, MORPHO_BLUE, 0, 0, address(0), deadline, sig,
             o.orderData, o.executionData, hex""
         );
     }
@@ -395,12 +397,12 @@ contract SettlementDeltaForkTest is Test {
         ICreditDelegation(vDebtUSDC_dst).approveDelegation(address(settlement), type(uint256).max);
 
         uint48 deadline = uint48(block.timestamp + 1 hours);
-        bytes memory sig = _signOrder(userPk, root, deadline, 0, settlementPayload);
+        bytes memory sig = _signOrder(userPk, root, deadline, 0, address(0), settlementPayload);
 
         // Surplus = borrow excess → FeeExceedsMax (maxFee=0)
         vm.expectRevert(SettlementExecutor.FeeExceedsMax.selector);
         settlement.settleWithFlashLoan(
-            USDC, flashLoanAmount, MORPHO_BLUE, 0, 0, deadline, sig,
+            USDC, flashLoanAmount, MORPHO_BLUE, 0, 0, address(0), deadline, sig,
             orderData, executionData, hex""
         );
     }
@@ -455,11 +457,11 @@ contract SettlementDeltaForkTest is Test {
         );
 
         uint48 deadline = uint48(block.timestamp + 1 hours);
-        bytes memory sig = _signOrder(userPk, root, deadline, 0, settlementPayload);
+        bytes memory sig = _signOrder(userPk, root, deadline, 0, address(0), settlementPayload);
 
         vm.expectRevert(SettlementExecutor.InvalidMerkleProof.selector);
         settlement.settleWithFlashLoan(
-            USDC, flashLoanAmount, MORPHO_BLUE, 0, 0, deadline, sig,
+            USDC, flashLoanAmount, MORPHO_BLUE, 0, 0, address(0), deadline, sig,
             orderData, executionData, hex""
         );
     }
