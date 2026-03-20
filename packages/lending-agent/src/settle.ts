@@ -17,7 +17,7 @@ import {
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import type { MerkleLeaf, StoredOrder } from './order.js'
 import { callTool } from './mcp.js'
-import { DRY_RUN, ECONOMIC_MODE, RPC_URL_BY_CHAIN, CONTRACTS_BY_CHAIN } from './config.js'
+import { DRY_RUN, ECONOMIC_MODE, RPC_URL_BY_CHAIN, CONTRACTS_BY_CHAIN, CHAIN_NAMES } from './config.js'
 
 // Morpho Blue is the flash loan provider — same address on all supported chains
 const MORPHO_BLUE = '0xBBBBBbbBBb9cC5e90e3b3Af64bdAF62C37EEFFCb' as Address
@@ -245,13 +245,19 @@ export async function executeSettlement(
     return 'DRY_RUN'
   }
 
-  const result = await callTool(wdkClient, 'sendTransaction', {
+  const chain = CHAIN_NAMES[tx.chainId]
+  if (!chain) throw new Error(`No chain name mapping for chainId ${tx.chainId}`)
+
+  const result = await callTool(wdkClient, 'sendContractTransaction', {
     to: tx.to,
     data: tx.data,
-    value: '0x0',
-    chainId: tx.chainId,
+    chain,
   })
 
   console.log('  tx result:', result)
+
+  // Treat MCP errors and non-hex results as failures
+  if (!result.startsWith('0x')) throw new Error(`sendTransaction failed: ${result}`)
+
   return result
 }

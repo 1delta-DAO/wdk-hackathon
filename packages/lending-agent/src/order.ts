@@ -66,6 +66,10 @@ function isAaveLender(numericId: number): boolean {
   return numericId < LenderIds.UP_TO_AAVE_V2 // 0–1999
 }
 
+function isCompoundV3Lender(numericId: number): boolean {
+  return numericId >= LenderIds.UP_TO_AAVE_V2 && numericId < LenderIds.UP_TO_COMPOUND_V3 // 2000–2999
+}
+
 function isMorphoLender(numericId: number): boolean {
   return numericId >= LenderIds.UP_TO_COMPOUND_V2 && numericId < LenderIds.UP_TO_MORPHO // 4000–4999
 }
@@ -74,6 +78,15 @@ function isMorphoLender(numericId: number): boolean {
 
 function addrAt(data: Hex, byteOffset: number): Address {
   return getAddress(`0x${data.slice(2 + byteOffset * 2, 2 + (byteOffset + 20) * 2)}`)
+}
+
+// WITHDRAW: [1: isBase][20: comet], BORROW/DEPOSIT/REPAY: [20: comet]
+function decodeCompoundV3Withdraw(data: Hex): { isBase: boolean; comet: Address } {
+  const raw = data.slice(2)
+  return { isBase: parseInt(raw.slice(0, 2), 16) !== 0, comet: getAddress(`0x${raw.slice(2, 42)}`) }
+}
+function decodeCompoundV3Action(data: Hex): { comet: Address } {
+  return { comet: addrAt(data, 0) }
 }
 
 interface DecodedAaveDeposit  { pool: Address }
@@ -149,10 +162,13 @@ export interface LeafDescription {
   op: string
   protocol: string
   lender: number
+  lenderId: number
   // Aave fields
   pool?: string
   aToken?: string
   debtToken?: string
+  // Compound V3 fields
+  comet?: string
   // Morpho fields
   loanToken?: string
   collateralToken?: string
@@ -168,7 +184,7 @@ export interface LeafDescription {
 export function describeLeaves(leaves: MerkleLeaf[]): LeafDescription[] {
   return leaves.map((leaf, index) => {
     const protocol = fromSettlementLenderId(leaf.lender)
-    const base: LeafDescription = { index, op: OP_NAMES[leaf.op] ?? String(leaf.op), protocol, lender: leaf.lender }
+    const base: LeafDescription = { index, op: OP_NAMES[leaf.op] ?? String(leaf.op), protocol, lender: leaf.lender, lenderId: leaf.lender }
 
     if (isAaveLender(leaf.lender)) {
       if (leaf.op === 0 /* DEPOSIT */) {
@@ -187,6 +203,15 @@ export function describeLeaves(leaves: MerkleLeaf[]): LeafDescription[] {
         const d = decodeAaveWithdraw(leaf.data)
         return { ...base, aToken: d.aToken, pool: d.pool }
       }
+    }
+
+    if (isCompoundV3Lender(leaf.lender)) {
+      if (leaf.op === 3 /* WITHDRAW */) {
+        const d = decodeCompoundV3Withdraw(leaf.data)
+        return { ...base, comet: d.comet }
+      }
+      const d = decodeCompoundV3Action(leaf.data)
+      return { ...base, comet: d.comet }
     }
 
     if (isMorphoLender(leaf.lender)) {

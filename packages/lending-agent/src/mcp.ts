@@ -9,9 +9,9 @@ export type ToolRouter = (toolName: string, input: Record<string, unknown>) => P
 // ── Connect ───────────────────────────────────────────────────────────────────
 
 export async function connectOneDelta (): Promise<Client> {
-  const requestInit: RequestInit | undefined = process.env.ONEDELTA_API_KEY
-    ? { headers: { Authorization: `Bearer ${process.env.ONEDELTA_API_KEY}` } }
-    : undefined
+  const headers: Record<string, string> = { 'Cache-Control': 'no-cache' }
+  if (process.env.ONEDELTA_API_KEY) headers['Authorization'] = `Bearer ${process.env.ONEDELTA_API_KEY}`
+  const requestInit: RequestInit = { headers }
   const transport = new StreamableHTTPClientTransport(new URL(ONEDELTA_MCP_URL), { requestInit })
   const client = new Client({ name: 'lending-agent-1delta', version: '1.0.0' })
   await client.connect(transport)
@@ -69,6 +69,12 @@ function truncate (text: string): string {
 export async function callTool (client: Client, name: string, input: Record<string, unknown>): Promise<string> {
   const result = await client.callTool({ name, arguments: input })
   return truncate(extractText(result.content as McpContent))
+}
+
+/** Like callTool but skips truncation — use for local tools that parse the result as JSON. */
+export async function callToolRaw (client: Client, name: string, input: Record<string, unknown>): Promise<string> {
+  const result = await client.callTool({ name, arguments: input })
+  return extractText(result.content as McpContent)
 }
 
 // ── Generic tool format conversion ────────────────────────────────────────────

@@ -1,5 +1,5 @@
 import { CONTRACTS_BY_CHAIN } from './config.js'
-import { callTool, toGenericTools, createRouter } from './mcp.js'
+import { callTool, createRouter } from './mcp.js'
 import type { LocalHandler } from './mcp.js'
 import type { GenericTool } from './providers/index.js'
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js'
@@ -7,6 +7,7 @@ import { buildSettlementSystemPrompt } from './prompt.js'
 import { runAgentLoop } from './agent.js'
 import { fetchOrder, fetchOpenOrders, markOrderFilled, describeLeaves } from './order.js'
 import type { MerkleLeaf } from './order.js'
+import { buildSettlementContext } from './context.js'
 import { executeSettlement } from './settle.js'
 import type { Address } from 'viem'
 
@@ -18,9 +19,10 @@ export interface AgentClients {
 /**
  * Full settlement flow:
  *   1. Fetch StoredOrder from order backend
- *   2. Decode all leaves and describe them for the agent
- *   3. Agent fetches positions + rates and calls propose_migration
- *   4. TypeScript builds executionData from chosen leaves and submits via WDK
+ *   2. Decode all leaves
+ *   3. TypeScript pre-processes: fetch positions + rates → SettlementContext
+ *   4. Agent receives structured options and calls propose_migration
+ *   5. TypeScript builds executionData and submits via WDK
  */
 export async function runSettlementFlow(
   clients: AgentClients,
@@ -45,26 +47,35 @@ export async function runSettlementFlow(
   leafDescriptions.forEach(l => {
     const extra = l.pool ? `pool=${l.pool.slice(0, 10)}…`
       : l.loanToken ? `loan=${l.loanToken.slice(0, 10)}… coll=${l.collateralToken?.slice(0, 10)}… lltv=${l.lltv}`
+      : l.comet ? `comet=${l.comet.slice(0, 10)}…`
       : ''
     console.log(`  [${l.index}] ${l.op} ${l.protocol} ${extra}`)
   })
 
-  // ── Tools ────────────────────────────────────────────────
-  const [{ tools: oneDeltaTools }, { tools: wdkTools }] = await Promise.all([
-    oneDeltaClient.listTools(),
-    wdkClient.listTools(),
-  ])
+  // ── Pre-process: build settlement context ────────────────
+  console.log('\nBuilding settlement context…')
+  const ctx = await buildSettlementContext(order, chainId, leafDescriptions, oneDeltaClient)
 
-  const oneDeltaNeeded = new Set(['get_user_positions', 'find_market', 'get_lender_ids'])
-  const wdkNeeded = new Set(['getAddress'])
+  if (!ctx) {
+    console.log('No viable settlement context — skipping order.')
+    return 'SKIPPED_NO_CONTEXT'
+  }
 
-  const filteredOneDelta = oneDeltaTools.filter(t => oneDeltaNeeded.has(t.name))
-  const filteredWdk = wdkTools.filter(t => wdkNeeded.has(t.name))
+  if (ctx.destinations.length === 0) {
+    console.log('No destination options available — skipping order.')
+    return 'SKIPPED_NO_DESTINATIONS'
+  }
 
-  const toolClientMap = Object.fromEntries([
-    ...filteredOneDelta.map(t => [t.name, oneDeltaClient] as const),
-    ...filteredWdk.map(t => [t.name, wdkClient] as const),
-  ])
+  // ── Wallet address ───────────────────────────────────────
+  let walletAddress = ''
+  try {
+    const raw = await callTool(wdkClient, 'getAddress', { chain: 'ethereum' })
+    // WDK may return "Address: 0x..." — extract the raw hex address
+    const match = raw.match(/0x[0-9a-fA-F]{40}/)
+    walletAddress = match ? match[0] : raw
+  } catch (err) {
+    console.warn('Could not fetch wallet address:', err instanceof Error ? err.message : err)
+  }
 
   // ── propose_migration local tool ─────────────────────────
   interface MigrationDecision {
@@ -87,7 +98,8 @@ export async function runSettlementFlow(
       destBorrowLeafIndex:     Number(input.destBorrowLeafIndex),
       collateralAsset:         String(input.collateralAsset) as Address,
       debtAsset:               String(input.debtAsset) as Address,
-      debtAmountBaseUnits:     String(input.debtAmountBaseUnits),
+      // Always use pre-computed base units from context — agent may hallucinate this value
+      debtAmountBaseUnits:     ctx.source.debtAmountBaseUnits,
       reason:                  String(input.reason),
     } as MigrationDecision
     console.log('\n→ Agent proposed migration:', migrationDecision.reason)
@@ -104,38 +116,25 @@ export async function runSettlementFlow(
         sourceWithdrawLeafIndex: { type: 'number',  description: 'Index of the WITHDRAW leaf for the source protocol' },
         destDepositLeafIndex:    { type: 'number',  description: 'Index of the DEPOSIT leaf for the destination protocol' },
         destBorrowLeafIndex:     { type: 'number',  description: 'Index of the BORROW leaf for the destination protocol' },
-        collateralAsset:         { type: 'string',  description: 'Underlying collateral token address (from get_user_positions)' },
-        debtAsset:               { type: 'string',  description: 'Underlying debt token address (from get_user_positions)' },
-        debtAmountBaseUnits:     { type: 'string',  description: 'Current debt amount in base units as a string' },
+        collateralAsset:         { type: 'string',  description: 'Underlying collateral token address' },
+        debtAsset:               { type: 'string',  description: 'Underlying debt token address' },
         reason:                  { type: 'string',  description: 'Why this is the best option (rates comparison)' },
       },
       required: [
         'sourceRepayLeafIndex', 'sourceWithdrawLeafIndex',
         'destDepositLeafIndex', 'destBorrowLeafIndex',
-        'collateralAsset', 'debtAsset', 'debtAmountBaseUnits', 'reason',
+        'collateralAsset', 'debtAsset', 'reason',
       ],
     },
   }
 
-  // ── Wallet address ───────────────────────────────────────
-  let walletAddress = ''
-  try {
-    walletAddress = await callTool(wdkClient, 'getAddress', { chain: 'ethereum' })
-  } catch (err) {
-    console.warn('Could not fetch wallet address:', err instanceof Error ? err.message : err)
-  }
-
   // ── Run agent ────────────────────────────────────────────
-  const allTools: GenericTool[] = [
-    ...toGenericTools(filteredOneDelta),
-    ...toGenericTools(filteredWdk),
-    proposeMigrationTool,
-  ]
+  const allTools: GenericTool[] = [proposeMigrationTool]
 
-  const systemPrompt = buildSettlementSystemPrompt(walletAddress, order.signer, chainId, leafDescriptions)
-  const userMessage = `Analyze the available leaves for order ${orderId} on chain ${chainId} and find the best migration to execute.`
+  const systemPrompt = buildSettlementSystemPrompt(walletAddress, ctx)
+  const userMessage = `Analyze the pre-computed settlement context for order ${orderId} on chain ${chainId} and execute the best migration.`
 
-  const router = createRouter(toolClientMap, { propose_migration: proposeMigration })
+  const router = createRouter({}, { propose_migration: proposeMigration })
   const resultText = await runAgentLoop(router, systemPrompt, allTools, userMessage)
 
   console.log('\n=== Agent Result ===')
@@ -200,5 +199,3 @@ export async function runAllSettlements(
 
   return results
 }
-
-

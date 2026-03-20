@@ -1,78 +1,78 @@
 import { DRY_RUN } from './config.js'
-import type { LeafDescription } from './order.js'
+import type { SettlementContext } from './context.js'
 
 /**
  * System prompt for the settlement agent.
  *
- * The agent sees all leaves (with indices) decoded into human-readable form,
- * fetches current positions and rates via 1delta, then calls propose_migration
- * with the chosen source/dest leaf indices and underlying token addresses.
+ * Receives pre-computed SettlementContext (source + destination rates already
+ * fetched by TypeScript). The agent only needs to decide which option is best
+ * and call propose_migration with the chosen leaf indices.
  */
 export function buildSettlementSystemPrompt(
   walletAddress: string,
-  orderSigner: string,
-  chainId: number,
-  leaves: LeafDescription[],
+  ctx: SettlementContext,
 ): string {
   const dryRunNote = DRY_RUN
-    ? '\nDRY RUN MODE: Do NOT call propose_migration. Only fetch data and report what you would do.'
+    ? '\nDRY RUN MODE: Do NOT call propose_migration. Only report what you would do.'
     : ''
 
-  const leavesText = leaves.map(l => {
-    const fields: string[] = [`[${l.index}] op=${l.op} | protocol=${l.protocol} | lender=${l.lender}`]
-    if (l.pool)             fields.push(`pool=${l.pool}`)
-    if (l.aToken)           fields.push(`aToken=${l.aToken}`)
-    if (l.debtToken)        fields.push(`debtToken=${l.debtToken}`)
-    if (l.loanToken)        fields.push(`loanToken=${l.loanToken}`)
-    if (l.collateralToken)  fields.push(`collateralToken=${l.collateralToken}`)
-    if (l.lltv)             fields.push(`lltv=${l.lltv}`)
-    if (l.oracle)           fields.push(`oracle=${l.oracle}`)
-    if (l.morpho)           fields.push(`morpho=${l.morpho}`)
-    return fields.join(' | ')
-  }).join('\n')
+  const { source, destinations } = ctx
 
-  return `You are an AI settlement agent. The user has signed an order allowing specific lending operations.
-Your job is to find the best migration among the allowed options and execute it.
+  const sourceBlock = [
+    `Protocol: ${source.lender}`,
+    `Collateral: ${source.collateralToken}`,
+    `Debt:       ${source.debtToken}`,
+    `Debt amount (base units): ${source.debtAmountBaseUnits}`,
+    `Collateral deposit rate: ${source.rates.collateralDepositRate?.toFixed(4) ?? 'N/A'}`,
+    `Debt borrow rate:        ${source.rates.debtBorrowRate?.toFixed(4) ?? 'N/A'}`,
+    `Net yield (deposit − borrow): ${
+      source.rates.collateralDepositRate !== null && source.rates.debtBorrowRate !== null
+        ? (source.rates.collateralDepositRate - source.rates.debtBorrowRate).toFixed(4)
+        : 'N/A'
+    }`,
+    `REPAY leaf index:    ${source.group.repayLeafIndex}`,
+    `WITHDRAW leaf index: ${source.group.withdrawLeafIndex}`,
+  ].join('\n  ')
 
-CHAIN: ${chainId}
-WALLET: ${walletAddress || 'UNKNOWN — call getAddress(chain="ethereum") first'}
-ORDER SIGNER: ${orderSigner}
+  const destBlocks = destinations.length === 0
+    ? '  (none available)'
+    : destinations.map((d, i) => {
+        const net = d.rates.collateralDepositRate !== null && d.rates.debtBorrowRate !== null
+          ? (d.rates.collateralDepositRate - d.rates.debtBorrowRate).toFixed(4)
+          : 'N/A'
+        return [
+          `[${i}] Protocol: ${d.group.protocol} (${d.group.marketKey})`,
+          `  Collateral deposit rate: ${d.rates.collateralDepositRate?.toFixed(4) ?? 'N/A'}`,
+          `  Debt borrow rate:        ${d.rates.debtBorrowRate?.toFixed(4) ?? 'N/A'}`,
+          `  Net yield (deposit − borrow): ${net}`,
+          `  DEPOSIT leaf index: ${d.group.depositLeafIndex}`,
+          `  BORROW leaf index:  ${d.group.borrowLeafIndex}`,
+        ].join('\n')
+      }).join('\n\n')
 
-AVAILABLE LEAVES (signed by the user — reference by index):
-${leavesText}
+  return `You are an AI settlement agent. All market data has been pre-fetched.
+Your only job: pick the best destination and call propose_migration once.
+
+CHAIN: ${ctx.chainId}
+WALLET: ${walletAddress || 'UNKNOWN'}
+ORDER SIGNER: ${ctx.orderSigner}
+
+CURRENT SOURCE POSITION:
+  ${sourceBlock}
+
+DESTINATION OPTIONS:
+${destBlocks}
 
 OPTIMIZATION GOAL:
-Find the source→dest combination that maximises net yield improvement:
-  best_dest(depositRate_collateral − borrowRate_debt) − current(depositRate_collateral − borrowRate_debt)
-Only consider destinations different from the user's current protocol.
-If no improvement is found, report that clearly — do not execute.
+Pick the destination with the highest net yield improvement over the current source:
+  improvement = dest(depositRate_collateral − borrowRate_debt) − source(depositRate_collateral − borrowRate_debt)
 
-WORKFLOW:
-1. Call get_user_positions with account="${orderSigner}", chains="${chainId}" to find the current position.
-   This tells you which protocol the user is currently on and the underlying token addresses.
-2. Identify the SOURCE leaves (REPAY + WITHDRAW pair) matching the current position's protocol and pool/market.
-3. For each DESTINATION leaf pair (DEPOSIT + BORROW), call find_market twice:
-     find_market(chainId="${chainId}", tokenAddress=<collateralToken>, lender=<protocol>)
-     find_market(chainId="${chainId}", tokenAddress=<debtToken>, lender=<protocol>)
-   Pair by lender. Compute depositRate_collateral − borrowRate_debt for each dest.
-4. Also fetch the source market rates to compute current net yield.
-5. Pick the dest with the highest improvement over current.
-6. If improvement > 0, call propose_migration with:
-     sourceRepayLeafIndex    — index of the REPAY leaf for the source
-     sourceWithdrawLeafIndex — index of the WITHDRAW leaf for the source
-     destDepositLeafIndex    — index of the DEPOSIT leaf for the chosen dest
-     destBorrowLeafIndex     — index of the BORROW leaf for the chosen dest
-     collateralAsset         — underlying collateral token address (from get_user_positions)
-     debtAsset               — underlying debt token address (from get_user_positions)
-     debtAmountBaseUnits     — current debt amount as a string (from get_user_positions)
-     reason                  — one-line explanation of why this is the best option
+If improvement > 0, call propose_migration with the destination's leaf indices and the source token addresses.
+If no destination improves on the source, report that clearly — do NOT call propose_migration.
 
 RULES:
-- Only use leaf indices from the AVAILABLE LEAVES list above.
-- Source REPAY and WITHDRAW leaves must be from the same protocol and market as the current position.
-- Dest DEPOSIT and BORROW leaves must be from the same protocol and market.
-- Do not migrate to the protocol the user is already on (no-op).
-- For Morpho: match leaves by loanToken/collateralToken pair.
-- For Aave: match leaves by pool address.
-- debtAmountBaseUnits must be passed as a string (not a number) to preserve precision.${dryRunNote}`
+- Use ONLY the leaf indices shown above.
+- collateralAsset = ${source.collateralToken}
+- debtAsset       = ${source.debtToken}
+- reason: one-line explanation comparing net yields${dryRunNote}`
 }
