@@ -280,9 +280,9 @@ export default function App() {
                 />
               </section>
 
-              {/* Column 2: Token selection (for Aave protocols) */}
+              {/* Column 2: Token selection */}
               <section className="lg:col-span-5">
-                {aaveLenders.length > 0 ? (
+                {selectedLenders.length > 0 ? (
                   <div>
                     <h2 className="text-lg font-semibold mb-3 text-gray-300">
                       Select Tokens
@@ -302,26 +302,45 @@ export default function App() {
                           />
                         )
                       })}
-                    </div>
-                  </div>
-                ) : selectedLenders.length > 0 ? (
-                  <div className="space-y-3">
-                    {selectedLenders.some(l => l.family === 'MORPHO_BLUE') && (
-                      <div className="rounded-lg border border-gray-800 bg-gray-900/50 px-4 py-3">
-                        <div className="text-sm text-gray-300 font-medium">
-                          Morpho Markets
+
+                      {selectedLenders.some(l => l.family === 'MORPHO_BLUE') && (
+                        <div className="border border-gray-800 rounded-lg overflow-hidden">
+                          <div className="px-4 py-2.5 bg-gray-900/80 border-b border-gray-800">
+                            <span className="text-sm font-medium text-purple-300">Morpho Blue</span>
+                          </div>
+                          <div className="px-4 py-3">
+                            <div className="text-xs text-gray-500">
+                              {morphoLoading
+                                ? 'Loading markets...'
+                                : morphoError
+                                  ? <span className="text-red-400">Failed to load markets: {morphoError}</span>
+                                  : `${morphoMarkets.length} market${morphoMarkets.length !== 1 ? 's' : ''} found (TVL > $100k)`}
+                            </div>
+                            <div className="flex items-center gap-1.5 mt-2">
+                              <svg className="w-3.5 h-3.5 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                              </svg>
+                              <span className="text-xs text-emerald-400">All markets permissioned</span>
+                            </div>
+                          </div>
                         </div>
-                        <div className="text-xs text-gray-500 mt-1">
-                          {morphoLoading
-                            ? 'Loading markets...'
-                            : morphoError
-                              ? <span className="text-red-400">Failed to load markets: {morphoError}</span>
-                              : `${morphoMarkets.length} market${morphoMarkets.length !== 1 ? 's' : ''} found (TVL > $100k)`}
+                      )}
+
+                      {selectedLenders.filter(l => l.family === 'COMPOUND_V3').map(lender => (
+                        <div key={lender.id} className="border border-gray-800 rounded-lg overflow-hidden">
+                          <div className="px-4 py-2.5 bg-gray-900/80 border-b border-gray-800">
+                            <span className="text-sm font-medium text-purple-300">{lender.label}</span>
+                          </div>
+                          <div className="px-4 py-3">
+                            <div className="flex items-center gap-1.5">
+                              <svg className="w-3.5 h-3.5 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                              </svg>
+                              <span className="text-xs text-emerald-400">All tokens permissioned</span>
+                            </div>
+                          </div>
                         </div>
-                      </div>
-                    )}
-                    <div className="text-gray-500 text-sm py-4 text-center">
-                      Compound V3 and Morpho permissions don't require token selection
+                      ))}
                     </div>
                   </div>
                 ) : null}
