@@ -41,14 +41,14 @@ abstract contract CompoundV2SettlementLending is ERC20Selectors, Masks {
      * @param asset The underlying token address
      * @param amount The amount to borrow
      * @param receiver The address to receive borrowed tokens
-     * @param callerAddress Address of the caller
+     * @param orderSigner Address of the caller
      * @param data Lender-specific data: [20: cToken]
      */
     function _borrowFromCompoundV2(
         address asset,
         uint256 amount,
         address receiver,
-        address callerAddress,
+        address orderSigner,
         bytes memory data
     ) internal returns (uint256 amountIn, uint256 amountOut) {
         assembly {
@@ -57,7 +57,7 @@ abstract contract CompoundV2SettlementLending is ERC20Selectors, Masks {
 
             // borrowBehalf(address,uint256)
             mstore(ptr, 0x856e5bb300000000000000000000000000000000000000000000000000000000)
-            mstore(add(ptr, 0x4), callerAddress)
+            mstore(add(ptr, 0x4), orderSigner)
             mstore(add(ptr, 0x24), amount)
             if iszero(call(gas(), cToken, 0x0, ptr, 0x44, 0x0, 0x20)) {
                 returndatacopy(0, 0, returndatasize())
@@ -96,14 +96,14 @@ abstract contract CompoundV2SettlementLending is ERC20Selectors, Masks {
      * @param asset The underlying token address
      * @param amount The amount to withdraw (type(uint112).max = user's full balance)
      * @param receiver The address to receive withdrawn tokens
-     * @param callerAddress Address of the caller
+     * @param orderSigner Address of the caller
      * @param data Lender-specific data: [1: selectorId][20: cToken]
      */
     function _withdrawFromCompoundV2(
         address asset,
         uint256 amount,
         address receiver,
-        address callerAddress,
+        address orderSigner,
         bytes memory data
     ) internal returns (uint256 amountIn, uint256 amountOut) {
         assembly {
@@ -116,7 +116,7 @@ abstract contract CompoundV2SettlementLending is ERC20Selectors, Masks {
             if eq(amount, 0xffffffffffffffffffffffffffff) {
                 // balanceOfUnderlying(address)
                 mstore(0, 0x3af9e66900000000000000000000000000000000000000000000000000000000)
-                mstore(0x04, callerAddress)
+                mstore(0x04, orderSigner)
                 pop(call(gas(), cToken, 0x0, 0x0, 0x24, 0x0, 0x20))
                 amount := mload(0x0)
             }
@@ -133,7 +133,7 @@ abstract contract CompoundV2SettlementLending is ERC20Selectors, Masks {
                 )
 
             mstore(0x0, ERC20_BALANCE_OF)
-            mstore(0x4, callerAddress)
+            mstore(0x4, orderSigner)
             if iszero(staticcall(gas(), cToken, 0x0, 0x24, 0x0, 0x20)) {
                 returndatacopy(0, 0, returndatasize())
                 revert(0, returndatasize())
@@ -145,7 +145,7 @@ abstract contract CompoundV2SettlementLending is ERC20Selectors, Masks {
             case 0 {
                 // transferFrom(address,address,uint256)
                 mstore(ptr, ERC20_TRANSFER_FROM)
-                mstore(add(ptr, 0x04), callerAddress)
+                mstore(add(ptr, 0x04), orderSigner)
                 mstore(add(ptr, 0x24), address())
                 mstore(add(ptr, 0x44), cTokenTransferAmount)
 
@@ -173,7 +173,7 @@ abstract contract CompoundV2SettlementLending is ERC20Selectors, Masks {
             case 1 {
                 // redeemBehalf(address,uint256)
                 mstore(ptr, 0x210bc05200000000000000000000000000000000000000000000000000000000)
-                mstore(add(ptr, 0x4), callerAddress)
+                mstore(add(ptr, 0x4), orderSigner)
                 mstore(add(ptr, 0x24), cTokenTransferAmount)
                 if iszero(call(gas(), cToken, 0x0, ptr, 0x44, 0x0, 0x20)) {
                     returndatacopy(0, 0, returndatasize())
@@ -188,7 +188,7 @@ abstract contract CompoundV2SettlementLending is ERC20Selectors, Masks {
             case 2 {
                 // redeem(address,uint256) - iToken style
                 mstore(ptr, 0x1e9a695000000000000000000000000000000000000000000000000000000000)
-                mstore(add(ptr, 0x4), callerAddress)
+                mstore(add(ptr, 0x4), orderSigner)
                 mstore(add(ptr, 0x24), cTokenTransferAmount)
                 if iszero(call(gas(), cToken, 0x0, ptr, 0x44, 0x0, 0x0)) {
                     returndatacopy(0, 0, returndatasize())

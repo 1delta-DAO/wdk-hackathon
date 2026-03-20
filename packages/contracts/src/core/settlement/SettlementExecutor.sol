@@ -14,8 +14,9 @@ import {UniversalSettlementLending} from "./lending/UniversalSettlementLending.s
  *  SOLVER FEE — BORROW-ONLY, PERCENTAGE-BASED
  * ═══════════════════════════════════════════════════════════════════════════════
  *
- *  The user signs `maxFeeBps` — the maximum fee as a fraction of the total
- *  amount borrowed.  Denominator is 1e7 (sub-basis-point precision):
+ *  The user signs `maxFeeBps` as part of the EIP-712 order — the maximum
+ *  fee as a fraction of the total amount borrowed.
+ *  Denominator is 1e7 (sub-basis-point precision):
  *
  *      100% = 1e7    |  1 bps = 1 000    |  0.01 bps = 10
  *
@@ -289,7 +290,7 @@ abstract contract SettlementExecutor is UniversalSettlementLending {
     /**
      * @notice Execute a full settlement and assert zero-sum balances.
      *
-     * @param callerAddress  The order signer / position owner.
+     * @param orderSigner  The order signer / position owner.
      * @param maxFeeBps      Maximum solver fee as a fraction of total borrow (user-signed).
      *                       Denominator is 1e7 (100% = 1e7, 1 bps = 1 000).
      *                       E.g. 50 000 = 0.5%, 500 = 0.005%.  Set to 0 for fee-free.
@@ -298,7 +299,7 @@ abstract contract SettlementExecutor is UniversalSettlementLending {
      * @param fillerCalldata Forwarded to `_executeIntent` for DEX fills.
      */
     function _executeSettlement(
-        address callerAddress,
+        address orderSigner,
         uint256 maxFeeBps,
         bytes memory orderData,
         bytes memory executionData,
@@ -344,32 +345,30 @@ abstract contract SettlementExecutor is UniversalSettlementLending {
 
         // ── Stage 1: pre-actions ──
         (execOffset, deltaCount, riskyLenderMask) = _executeActions(
-            callerAddress, merkleRoot, executionData, execOffset, numPre, deltas, deltaCount
+            orderSigner, merkleRoot, executionData, execOffset, numPre, deltas, deltaCount
         );
 
         // ── Stage 2: intent (optional conversion) ──
         deltaCount = _executeIntent(
-            callerAddress, settlementData, fillerCalldata, deltas, deltaCount
+            orderSigner, settlementData, fillerCalldata, deltas, deltaCount
         );
 
         {
             // ── Stage 3: post-actions ──
             uint256 postMask;
             (execOffset, deltaCount, postMask) = _executeActions(
-                callerAddress, merkleRoot, executionData, execOffset, numPost, deltas, deltaCount
+                orderSigner, merkleRoot, executionData, execOffset, numPost, deltas, deltaCount
             );
             riskyLenderMask |= postMask;
         }
 
         // ── Stage 4: sweep borrow fees, verify no deficits ──
-        _sweepAndVerify(deltas, deltaCount, callerAddress, feeRecipient, maxFeeBps);
+        _sweepAndVerify(deltas, deltaCount, orderSigner, feeRecipient, maxFeeBps);
 
         // ── Stage 5: post-settlement conditions (health factor, etc.) ──
-        // Only run for lender buckets that had a borrow or withdraw.
-        // Deposits and repays can only improve health, so skipping them
-        // avoids blocking migrations from bad positions to better ones.
+        // Run for all lender buckets that were touched by any operation.
         if (riskyLenderMask != 0) {
-            _postSettlementCheck(callerAddress, settlementData, riskyLenderMask);
+            _postSettlementCheck(orderSigner, settlementData, riskyLenderMask);
         }
     }
 
@@ -379,7 +378,7 @@ abstract contract SettlementExecutor is UniversalSettlementLending {
      * @notice Parse, verify, execute, and account for a batch of lending actions.
      */
     function _executeActions(
-        address callerAddress,
+        address orderSigner,
         bytes32 merkleRoot,
         bytes memory executionData,
         uint256 execOffset,
@@ -461,9 +460,8 @@ abstract contract SettlementExecutor is UniversalSettlementLending {
                 )
             }
 
-            // Track borrow/withdraw ops per lender bucket — only these can worsen health.
-            // Bitmap: bit 0 = Aave (<2000), bit 1 = CompV3 (<3000), bit 2 = CompV2 (<4000),
-            //         bit 3 = Morpho (<5000), bit 4 = Silo (<6000)
+            // Track lender bucket for post-settlement health checks.
+            // Using the original conditional form to avoid stack-too-deep.
             if (op == OP_BORROW || op == OP_WITHDRAW || op == OP_WITHDRAW_LENDING_TOKEN) {
                 uint256 bucket;
                 if (lender < 2000) bucket = 0;
@@ -475,7 +473,7 @@ abstract contract SettlementExecutor is UniversalSettlementLending {
             }
 
             newDeltaCount = _dispatchAndAccumulate(
-                callerAddress, asset, amount, receiver, op, lender, lenderData, deltas, newDeltaCount
+                orderSigner, asset, amount, receiver, op, lender, lenderData, deltas, newDeltaCount
             );
 
             unchecked { ++i; }
@@ -488,7 +486,7 @@ abstract contract SettlementExecutor is UniversalSettlementLending {
      * @notice Dispatch one lending operation, fold into deltas, track borrows.
      */
     function _dispatchAndAccumulate(
-        address callerAddress,
+        address orderSigner,
         address asset,
         uint256 amount,
         address receiver,
@@ -498,8 +496,15 @@ abstract contract SettlementExecutor is UniversalSettlementLending {
         AssetDelta[] memory deltas,
         uint256 deltaCount
     ) private returns (uint256 newDeltaCount) {
+        // Receiver override for deposit/repay: force orderSigner so position
+        // credits (aTokens, debt reduction) go to the user who signed the order.
+        // Borrow/withdraw keep the solver-specified receiver (typically address(this))
+        // — delta accounting + non-borrow surplus revert prevent theft.
+        address effectiveReceiver = (op == OP_BORROW || op == OP_WITHDRAW || op == OP_WITHDRAW_LENDING_TOKEN)
+            ? receiver
+            : orderSigner;
         (address assetUsed, uint256 amountIn, uint256 amountOut) =
-            _lendingOperations(callerAddress, asset, amount, receiver, op, lender, lenderData);
+            _lendingOperations(orderSigner, asset, amount, effectiveReceiver, op, lender, lenderData);
 
         int256 change = int256(amountOut) - int256(amountIn);
 
@@ -514,7 +519,7 @@ abstract contract SettlementExecutor is UniversalSettlementLending {
     }
 
     /**
-     * @notice Sweep borrow-surplus as fee and verify no deficits.
+     * @notice Sweep borrow-surplus as fee and verify no deficits or unaccounted surplus.
      *
      * @dev For each tracked asset:
      *
@@ -522,9 +527,9 @@ abstract contract SettlementExecutor is UniversalSettlementLending {
      *            Percentage-checked: surplus × 1e7 ≤ totalBorrowed × maxFeeBps
      *            Transferred to feeRecipient.
      *
-     *        delta > 0, totalBorrowed == 0 → non-borrow surplus → ignored
-     *            Funds stay in the contract. The solver is expected to deposit
-     *            excess into a lender for the user via post-actions.
+     *        delta > 0, totalBorrowed == 0 → non-borrow surplus → revert
+     *            The solver MUST deposit excess back into a lender for the user
+     *            via post-actions. Any remaining surplus is an error.
      *
      *        delta < 0 → deficit → revert (UnbalancedSettlement)
      *        delta == 0 → balanced → ok
@@ -555,9 +560,11 @@ abstract contract SettlementExecutor is UniversalSettlementLending {
                     if (feeRecipient != address(0)) {
                         _transferOut(deltas[i].asset, surplus, feeRecipient);
                     }
+                } else {
+                    // Non-borrow surplus → revert. Solver must re-deposit excess
+                    // into a lender for the user via post-actions.
+                    revert UnbalancedSettlement();
                 }
-                // else: non-borrow surplus — no sweep to user.
-                // Solver should deposit excess into a lender via post-actions.
             }
 
             unchecked { ++i; }
@@ -621,7 +628,7 @@ abstract contract SettlementExecutor is UniversalSettlementLending {
      *      The `deltas` array MUST be updated in-place to reflect any conversion.
      *      If no conversion is needed, return `deltaCount` unchanged.
      *
-     * @param callerAddress  The order signer / position owner.
+     * @param orderSigner  The order signer / position owner.
      * @param settlementData The user-signed settlement parameters (extracted from orderData).
      *                       Empty bytes if no intent parameters were signed.
      * @param fillerCalldata Solver-provided swap execution payload.
@@ -631,7 +638,7 @@ abstract contract SettlementExecutor is UniversalSettlementLending {
      * @return newDeltaCount Updated count after any new assets introduced by conversions.
      */
     function _executeIntent(
-        address callerAddress,
+        address orderSigner,
         bytes memory settlementData,
         bytes memory fillerCalldata,
         AssetDelta[] memory deltas,
@@ -644,7 +651,7 @@ abstract contract SettlementExecutor is UniversalSettlementLending {
      * @dev Override to enforce conditions such as minimum health factor.
      *      Default implementation is a no-op.
      *
-     * @param callerAddress  The order signer / position owner.
+     * @param orderSigner  The order signer / position owner.
      * @param settlementData The user-signed settlement parameters (extracted from orderData).
      */
     /**
@@ -655,7 +662,7 @@ abstract contract SettlementExecutor is UniversalSettlementLending {
      *        bit 3 = Morpho (<5000), bit 4 = Silo (<6000)
      */
     function _postSettlementCheck(
-        address callerAddress,
+        address orderSigner,
         bytes memory settlementData,
         uint256 riskyLenderMask
     ) internal virtual {}

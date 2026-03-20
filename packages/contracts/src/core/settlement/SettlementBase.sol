@@ -105,7 +105,7 @@ abstract contract SettlementBase is
         bytes calldata executionData,
         bytes calldata fillerCalldata
     ) external {
-        (address user,) = _verifyAndExtract(deadline, signature, orderData);
+        (address user,) = _verifyAndExtract(maxFeeBps, deadline, signature, orderData);
         _executeSettlement(user, maxFeeBps, orderData, executionData, fillerCalldata);
     }
 
@@ -124,7 +124,7 @@ abstract contract SettlementBase is
         bytes calldata executionData,
         bytes calldata fillerCalldata
     ) external {
-        (address user,) = _verifyAndExtract(deadline, signature, orderData);
+        (address user,) = _verifyAndExtract(maxFeeBps, deadline, signature, orderData);
 
         // Callback layout: [20: user][1: poolId][8: maxFeeBps][2: orderLen][orderData][2: fillerLen][filler][executionData]
         uint256 paramsLen = 1 + 8 + 2 + orderData.length + 2 + fillerCalldata.length + executionData.length;
@@ -147,6 +147,7 @@ abstract contract SettlementBase is
     // ── Order Verification ───────────────────────────────
 
     function _verifyAndExtract(
+        uint256 maxFeeBps,
         uint48 deadline,
         bytes calldata signature,
         bytes calldata orderData
@@ -163,13 +164,13 @@ abstract contract SettlementBase is
             mstore(0x40, add(add(fmp, 0x20), and(add(sLen, 31), not(31))))
         }
 
-        user = _recoverOrderSigner(merkleRoot, deadline, settlementData, signature);
+        user = _recoverOrderSigner(merkleRoot, deadline, maxFeeBps, settlementData, signature);
     }
 
     // ── Intent: Oracle-Verified Swaps ────────────────────
 
     function _executeIntent(
-        address, /* callerAddress */
+        address, /* orderSigner */
         bytes memory settlementData,
         bytes memory fillerCalldata,
         AssetDelta[] memory deltas,
@@ -321,7 +322,7 @@ abstract contract SettlementBase is
     // ── Post-Settlement Conditions ───────────────────────
 
     function _postSettlementCheck(
-        address callerAddress,
+        address orderSigner,
         bytes memory settlementData,
         uint256 riskyLenderMask
     ) internal view virtual override {
@@ -359,7 +360,7 @@ abstract contract SettlementBase is
                         pool := shr(96, mload(add(ptr, 2)))
                         minHF := shr(144, mload(add(ptr, 22)))
                     }
-                    _checkAaveHealthFactor(pool, callerAddress, minHF);
+                    _checkAaveHealthFactor(pool, orderSigner, minHF);
                 }
                 cursor += 36;
             } else if (lenderId < LenderIds.UP_TO_COMPOUND_V3) {
@@ -373,7 +374,7 @@ abstract contract SettlementBase is
                         assetBitmap := and(0xffff, shr(240, mload(add(ptr, 22))))
                         minHF := shr(144, mload(add(ptr, 24)))
                     }
-                    _checkCompoundV3HealthFactor(comet, callerAddress, assetBitmap, minHF);
+                    _checkCompoundV3HealthFactor(comet, orderSigner, assetBitmap, minHF);
                 }
                 cursor += 38;
             } else if (lenderId < LenderIds.UP_TO_COMPOUND_V2) {
@@ -383,7 +384,7 @@ abstract contract SettlementBase is
                         let ptr := add(add(settlementData, 0x20), cursor)
                         comptroller := shr(96, mload(add(ptr, 2)))
                     }
-                    _checkCompoundV2Solvency(comptroller, callerAddress);
+                    _checkCompoundV2Solvency(comptroller, orderSigner);
                 }
                 cursor += 36;
             } else if (lenderId < LenderIds.UP_TO_MORPHO) {
@@ -397,7 +398,7 @@ abstract contract SettlementBase is
                         marketId := mload(add(ptr, 22))
                         minHF := shr(144, mload(add(ptr, 54)))
                     }
-                    _checkMorphoHealthFactor(morpho, marketId, callerAddress, minHF);
+                    _checkMorphoHealthFactor(morpho, marketId, orderSigner, minHF);
                 }
                 cursor += 68;
             } else if (lenderId < LenderIds.UP_TO_SILO_V2) {
@@ -407,7 +408,7 @@ abstract contract SettlementBase is
                         let ptr := add(add(settlementData, 0x20), cursor)
                         silo := shr(96, mload(add(ptr, 2)))
                     }
-                    _checkSiloV2Solvency(silo, callerAddress);
+                    _checkSiloV2Solvency(silo, orderSigner);
                 }
                 cursor += 36;
             } else {

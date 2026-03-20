@@ -9,6 +9,7 @@ const MIGRATION_ORDER_TYPES = {
   MigrationOrder: [
     { name: 'merkleRoot', type: 'bytes32' },
     { name: 'deadline', type: 'uint48' },
+    { name: 'maxFeeBps', type: 'uint256' },
     { name: 'settlementData', type: 'bytes' },
   ],
 } as const
@@ -65,6 +66,7 @@ export function useOrderSubmission(chainId: number | null) {
         message: {
           merkleRoot: params.merkleRoot,
           deadline,
+          maxFeeBps: BigInt(maxFeeBps),
           settlementData: params.settlementData,
         },
       })

@@ -35,14 +35,14 @@ abstract contract CompoundV3SettlementLending is ERC20Selectors, Masks {
      * @param asset The underlying token address
      * @param amount The amount to withdraw (type(uint112).max = user's full balance)
      * @param receiver The address to receive withdrawn tokens
-     * @param callerAddress Address of the caller
+     * @param orderSigner Address of the caller
      * @param data Lender-specific data: [1: isBase][20: comet]
      */
     function _withdrawFromCompoundV3(
         address asset,
         uint256 amount,
         address receiver,
-        address callerAddress,
+        address orderSigner,
         bytes memory data
     ) internal returns (uint256 amountIn, uint256 amountOut) {
         assembly {
@@ -57,7 +57,7 @@ abstract contract CompoundV3SettlementLending is ERC20Selectors, Masks {
                 case 0 {
                     // userCollateral(address,address)
                     mstore(ptr, 0x2b92a07d00000000000000000000000000000000000000000000000000000000)
-                    mstore(add(ptr, 0x04), callerAddress)
+                    mstore(add(ptr, 0x04), orderSigner)
                     mstore(add(ptr, 0x24), asset)
                     if iszero(staticcall(gas(), cometPool, ptr, 0x44, ptr, 0x20)) {
                         returndatacopy(0, 0, returndatasize())
@@ -67,7 +67,7 @@ abstract contract CompoundV3SettlementLending is ERC20Selectors, Masks {
                 }
                 default {
                     mstore(0, ERC20_BALANCE_OF)
-                    mstore(0x04, callerAddress)
+                    mstore(0x04, orderSigner)
                     if iszero(staticcall(gas(), cometPool, 0x0, 0x24, 0x0, 0x20)) {
                         returndatacopy(0, 0, returndatasize())
                         revert(0, returndatasize())
@@ -78,7 +78,7 @@ abstract contract CompoundV3SettlementLending is ERC20Selectors, Masks {
 
             // withdrawFrom(address,address,address,uint256)
             mstore(ptr, 0x2644131800000000000000000000000000000000000000000000000000000000)
-            mstore(add(ptr, 0x04), callerAddress)
+            mstore(add(ptr, 0x04), orderSigner)
             mstore(add(ptr, 0x24), receiver)
             mstore(add(ptr, 0x44), asset)
             mstore(add(ptr, 0x64), amount)
@@ -96,14 +96,14 @@ abstract contract CompoundV3SettlementLending is ERC20Selectors, Masks {
      * @param asset The underlying token address to borrow
      * @param amount The amount to borrow
      * @param receiver The address to receive borrowed tokens
-     * @param callerAddress Address of the caller
+     * @param orderSigner Address of the caller
      * @param data Lender-specific data: [20: comet]
      */
     function _borrowFromCompoundV3(
         address asset,
         uint256 amount,
         address receiver,
-        address callerAddress,
+        address orderSigner,
         bytes memory data
     ) internal returns (uint256 amountIn, uint256 amountOut) {
         assembly {
@@ -112,7 +112,7 @@ abstract contract CompoundV3SettlementLending is ERC20Selectors, Masks {
 
             // withdrawFrom(address,address,address,uint256)
             mstore(ptr, 0x2644131800000000000000000000000000000000000000000000000000000000)
-            mstore(add(ptr, 0x04), callerAddress)
+            mstore(add(ptr, 0x04), orderSigner)
             mstore(add(ptr, 0x24), receiver)
             mstore(add(ptr, 0x44), asset)
             mstore(add(ptr, 0x64), amount)

@@ -19,7 +19,7 @@ abstract contract MorphoFlashLoanCallback is Masks, DeltaErrors {
     function _morphoPool() internal pure virtual returns (address);
 
     function _onMorphoCallback() internal {
-        address origCaller;
+        address orderSigner;
         uint256 calldataLength;
         address pool = _morphoPool();
         assembly {
@@ -36,15 +36,15 @@ abstract contract MorphoFlashLoanCallback is Masks, DeltaErrors {
                 mstore(0, INVALID_FLASH_LOAN)
                 revert(0, 0x4)
             }
-            origCaller := shr(96, firstWord)
+            orderSigner := shr(96, firstWord)
             calldataLength := sub(calldataload(68), 21)
         }
         _settleInternal(
-            origCaller,
+            orderSigner,
             121,
             calldataLength
         );
     }
 
-    function _settleInternal(address callerAddress, uint256 offset, uint256 length) internal virtual {}
+    function _settleInternal(address orderSigner, uint256 offset, uint256 length) internal virtual {}
 }

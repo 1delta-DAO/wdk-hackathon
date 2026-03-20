@@ -404,6 +404,6 @@ export function buildMorphoLeavesForMarket(input: MorphoLeafInput): GeneratedLea
 export function protocolToLenderId(protocolId: string): number {
   if (protocolId === 'AAVE_V2') return LENDER_ID_AAVE_V2
   if (protocolId.startsWith('COMPOUND_V3_')) return LENDER_ID_COMPOUND_V3
-  if (protocolId.startsWith('MORPHO_BLUE') || protocolId === 'MORPHO_BLUE') return LENDER_ID_MORPHO
+  if (protocolId.startsWith('MORPHO_BLUE') || protocolId === 'MORPHO_BLUE' || protocolId === 'LISTA_DAO') return LENDER_ID_MORPHO
   return LENDER_ID_AAVE_V3
 }

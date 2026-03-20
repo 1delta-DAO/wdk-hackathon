@@ -64,7 +64,7 @@ describe('typed data definitions', () => {
 
   it('SettlementOrderTypedData has correct structure', () => {
     expect(SettlementOrderTypedData.primaryType).toBe('MigrationOrder')
-    expect(SettlementOrderTypedData.types.MigrationOrder).toHaveLength(3)
+    expect(SettlementOrderTypedData.types.MigrationOrder).toHaveLength(4)
   })
 })
 
@@ -128,12 +128,22 @@ describe('message builders', () => {
     expect(msg.value).toBe(BigInt('0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff'))
   })
 
-  it('buildSettlementOrderMessage defaults settlementData to 0x', () => {
+  it('buildSettlementOrderMessage defaults settlementData to 0x and maxFeeBps to 0', () => {
     const msg = buildSettlementOrderMessage({
       merkleRoot: '0x' + 'ab'.repeat(32) as `0x${string}`,
       deadline: 1000,
     })
     expect(msg.settlementData).toBe('0x')
+    expect(msg.maxFeeBps).toBe(0n)
+  })
+
+  it('buildSettlementOrderMessage accepts maxFeeBps', () => {
+    const msg = buildSettlementOrderMessage({
+      merkleRoot: '0x' + 'ab'.repeat(32) as `0x${string}`,
+      deadline: 1000,
+      maxFeeBps: 50000,
+    })
+    expect(msg.maxFeeBps).toBe(50000n)
   })
 })
 

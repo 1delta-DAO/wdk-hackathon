@@ -10,7 +10,7 @@ import {SettlementExecutor} from "../SettlementExecutor.sol";
  *         Subcontracts parse the callback calldata and call _executeSettlement.
  *
  * @dev Callback calldata layout (starting at offset 100, after ABI prefix):
- *   [20: origCaller][1: poolId][8: maxFeeBps]
+ *   [20: orderSigner][1: poolId][8: maxFeeBps]
  *   [2: orderDataLen][orderDataLen: orderData]
  *   [2: fillerCalldataLen][fillerCalldataLen: fillerCalldata]
  *   [remaining: executionData]
@@ -27,7 +27,7 @@ abstract contract MorphoSettlementCallback is SettlementExecutor {
     function _morphoPool() internal pure virtual returns (address);
 
     function _onMorphoSettlementCallback() internal {
-        address origCaller;
+        address orderSigner;
         uint256 maxFeeBps;
         bytes memory orderData;
         bytes memory fillerCalldata;
@@ -49,7 +49,7 @@ abstract contract MorphoSettlementCallback is SettlementExecutor {
                 revert(0, 0x4)
             }
 
-            origCaller := shr(96, firstWord)
+            orderSigner := shr(96, firstWord)
             maxFeeBps := shr(192, calldataload(121))
 
             let baseOffset := 129
@@ -79,6 +79,6 @@ abstract contract MorphoSettlementCallback is SettlementExecutor {
             mstore(0x40, add(add(fmp, 0x20), and(add(execLen, 31), not(31))))
         }
 
-        _executeSettlement(origCaller, maxFeeBps, orderData, executionData, fillerCalldata);
+        _executeSettlement(orderSigner, maxFeeBps, orderData, executionData, fillerCalldata);
     }
 }

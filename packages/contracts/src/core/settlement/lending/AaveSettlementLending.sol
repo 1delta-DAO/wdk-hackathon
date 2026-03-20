@@ -34,7 +34,7 @@ abstract contract AaveSettlementLending is ERC20Selectors, Masks {
      * @param asset The underlying token address
      * @param amount The amount to withdraw (type(uint112).max = user's full aToken balance)
      * @param receiver The address to receive withdrawn tokens
-     * @param callerAddress Address of the caller
+     * @param orderSigner Address of the caller
      * @param data Lender-specific data: [20: aToken][20: pool]
      * @return amountIn Always 0 for withdrawals
      * @return amountOut The actual amount withdrawn (resolved from max if applicable)
@@ -43,7 +43,7 @@ abstract contract AaveSettlementLending is ERC20Selectors, Masks {
         address asset,
         uint256 amount,
         address receiver,
-        address callerAddress,
+        address orderSigner,
         bytes memory data
     ) internal returns (uint256 amountIn, uint256 amountOut) {
         assembly {
@@ -58,7 +58,7 @@ abstract contract AaveSettlementLending is ERC20Selectors, Masks {
             case 0xffffffffffffffffffffffffffff {
                 // selector for balanceOf(address)
                 mstore(0, ERC20_BALANCE_OF)
-                mstore(0x04, callerAddress)
+                mstore(0x04, orderSigner)
                 if iszero(staticcall(gas(), collateralToken, 0x0, 0x24, 0x0, 0x20)) {
                     returndatacopy(0, 0, returndatasize())
                     revert(0, returndatasize())
@@ -68,7 +68,7 @@ abstract contract AaveSettlementLending is ERC20Selectors, Masks {
 
             // TRANSFER_FROM USER
             mstore(ptr, ERC20_TRANSFER_FROM)
-            mstore(add(ptr, 0x04), callerAddress)
+            mstore(add(ptr, 0x04), orderSigner)
             mstore(add(ptr, 0x24), address())
             mstore(add(ptr, 0x44), amount)
 
@@ -106,7 +106,7 @@ abstract contract AaveSettlementLending is ERC20Selectors, Masks {
      * @param asset The underlying token address to borrow
      * @param amount The amount to borrow
      * @param receiver The address to receive borrowed tokens
-     * @param callerAddress Address of the caller
+     * @param orderSigner Address of the caller
      * @param data Lender-specific data: [1: mode][20: pool]
      * @return amountIn Always 0 for borrows
      * @return amountOut The amount borrowed
@@ -115,7 +115,7 @@ abstract contract AaveSettlementLending is ERC20Selectors, Masks {
         address asset,
         uint256 amount,
         address receiver,
-        address callerAddress,
+        address orderSigner,
         bytes memory data
     ) internal returns (uint256 amountIn, uint256 amountOut) {
         assembly {
@@ -131,7 +131,7 @@ abstract contract AaveSettlementLending is ERC20Selectors, Masks {
                 mstore(add(ptr, 0x04), asset)
                 mstore(add(ptr, 0x24), amount)
                 mstore(add(ptr, 0x44), 0x0)
-                mstore(add(ptr, 0x64), callerAddress)
+                mstore(add(ptr, 0x64), orderSigner)
                 if iszero(call(gas(), pool, 0x0, ptr, 0x84, 0x0, 0x0)) {
                     returndatacopy(0x0, 0x0, returndatasize())
                     revert(0x0, returndatasize())
@@ -144,7 +144,7 @@ abstract contract AaveSettlementLending is ERC20Selectors, Masks {
                 mstore(add(ptr, 0x24), amount)
                 mstore(add(ptr, 0x44), mode)
                 mstore(add(ptr, 0x64), 0x0)
-                mstore(add(ptr, 0x84), callerAddress)
+                mstore(add(ptr, 0x84), orderSigner)
                 if iszero(call(gas(), pool, 0x0, ptr, 0xA4, 0x0, 0x0)) {
                     returndatacopy(0x0, 0x0, returndatasize())
                     revert(0x0, returndatasize())

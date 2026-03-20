@@ -13,14 +13,14 @@ contract MorphoFlashLoans is Masks {
      * @dev We allow ANY morpho style pool here
      * @param asset The token to flash-borrow
      * @param amount The amount to flash-borrow
-     * @param callerAddress Address of the caller
+     * @param orderSigner Address of the caller
      * @param data Lender-specific data:
      *   [20: pool][2: paramsLength][paramsLength: params]
      */
     function morphoFlashLoan(
         address asset,
         uint256 amount,
-        address callerAddress,
+        address orderSigner,
         bytes memory data
     ) internal {
         assembly {
@@ -39,7 +39,7 @@ contract MorphoFlashLoans is Masks {
             mstore(add(ptr, 36), amount)
             mstore(add(ptr, 68), 0x60) // offset
             mstore(add(ptr, 100), add(20, calldataLength)) // data length
-            mstore(add(ptr, 132), shl(96, callerAddress)) // caller
+            mstore(add(ptr, 132), shl(96, orderSigner)) // caller
 
             // memory-to-memory copy of params
             let src := add(d, 22)

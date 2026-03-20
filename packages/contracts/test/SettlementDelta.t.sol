@@ -206,9 +206,9 @@ contract SettlementDeltaTest is Test {
         harness.executeSettlement(CALLER, od, ed, bytes(""));
     }
 
-    // ── Non-borrow surplus → no sweep, stays in contract ───
+    // ── Non-borrow surplus → reverts (solver must re-deposit) ───
 
-    function test_nonBorrowSurplus_noSweep() public {
+    function test_nonBorrowSurplus_reverts() public {
         bytes memory d0 = hex"AA";
         bytes memory d1 = hex"BB";
 
@@ -230,8 +230,9 @@ contract SettlementDeltaTest is Test {
             _action(WETH, uint112(50), 0, d1, p1)
         );
 
-        // Non-borrow surplus is ignored — no transfer to user, no revert.
-        // Solver should deposit excess into a lender via post-actions.
+        // Non-borrow surplus reverts — solver must deposit all excess
+        // back into a lender for the user.
+        vm.expectRevert(SettlementExecutor.UnbalancedSettlement.selector);
         harness.executeSettlement(CALLER, od, ed, bytes(""));
     }
 

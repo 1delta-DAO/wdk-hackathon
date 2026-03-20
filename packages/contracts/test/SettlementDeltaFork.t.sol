@@ -46,7 +46,7 @@ contract SettlementDeltaForkTest is Test {
 
     // EIP-712
     bytes32 constant MIGRATION_ORDER_TYPEHASH =
-        keccak256("MigrationOrder(bytes32 merkleRoot,uint48 deadline,bytes settlementData)");
+        keccak256("MigrationOrder(bytes32 merkleRoot,uint48 deadline,uint256 maxFeeBps,bytes settlementData)");
 
     Settlement settlement;
 
@@ -101,11 +101,12 @@ contract SettlementDeltaForkTest is Test {
         uint256 pk,
         bytes32 merkleRoot,
         uint48 deadline,
+        uint256 maxFeeBps,
         bytes memory settlementPayload
     ) internal view returns (bytes memory) {
         bytes32 domainSeparator = settlement.DOMAIN_SEPARATOR();
         bytes32 structHash = keccak256(
-            abi.encode(MIGRATION_ORDER_TYPEHASH, merkleRoot, deadline, keccak256(settlementPayload))
+            abi.encode(MIGRATION_ORDER_TYPEHASH, merkleRoot, deadline, maxFeeBps, keccak256(settlementPayload))
         );
         bytes32 digest = keccak256(abi.encodePacked("\x19\x01", domainSeparator, structHash));
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(pk, digest);
@@ -250,7 +251,7 @@ contract SettlementDeltaForkTest is Test {
         );
 
         uint48 deadline = uint48(block.timestamp + 1 hours);
-        bytes memory sig = _signOrder(userPk, o.root, deadline, o.settlementPayload);
+        bytes memory sig = _signOrder(userPk, o.root, deadline, 0, o.settlementPayload);
 
         settlement.settleWithFlashLoan(
             USDC,
@@ -302,7 +303,7 @@ contract SettlementDeltaForkTest is Test {
         );
 
         uint48 deadline = uint48(block.timestamp - 1); // expired
-        bytes memory sig = _signOrder(userPk, o.root, deadline, o.settlementPayload);
+        bytes memory sig = _signOrder(userPk, o.root, deadline, 0, o.settlementPayload);
 
         vm.expectRevert(EIP712OrderVerifier.OrderExpired.selector);
         settlement.settleWithFlashLoan(
@@ -330,7 +331,7 @@ contract SettlementDeltaForkTest is Test {
         // Sign with a different key — recovered signer won't have the approvals
         (, uint256 wrongPk) = makeAddrAndKey("attacker");
         uint48 deadline = uint48(block.timestamp + 1 hours);
-        bytes memory sig = _signOrder(wrongPk, o.root, deadline, o.settlementPayload);
+        bytes memory sig = _signOrder(wrongPk, o.root, deadline, 0, o.settlementPayload);
 
         // The wrong signer has no aToken approval → the lending op will revert
         vm.expectRevert();
@@ -394,7 +395,7 @@ contract SettlementDeltaForkTest is Test {
         ICreditDelegation(vDebtUSDC_dst).approveDelegation(address(settlement), type(uint256).max);
 
         uint48 deadline = uint48(block.timestamp + 1 hours);
-        bytes memory sig = _signOrder(userPk, root, deadline, settlementPayload);
+        bytes memory sig = _signOrder(userPk, root, deadline, 0, settlementPayload);
 
         // Surplus = borrow excess → FeeExceedsMax (maxFee=0)
         vm.expectRevert(SettlementExecutor.FeeExceedsMax.selector);
@@ -454,7 +455,7 @@ contract SettlementDeltaForkTest is Test {
         );
 
         uint48 deadline = uint48(block.timestamp + 1 hours);
-        bytes memory sig = _signOrder(userPk, root, deadline, settlementPayload);
+        bytes memory sig = _signOrder(userPk, root, deadline, 0, settlementPayload);
 
         vm.expectRevert(SettlementExecutor.InvalidMerkleProof.selector);
         settlement.settleWithFlashLoan(

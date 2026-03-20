@@ -37,20 +37,20 @@ contract Settlement is
     }
 
     function _executeIntent(
-        address callerAddress,
+        address orderSigner,
         bytes memory settlementData,
         bytes memory fillerCalldata,
         AssetDelta[] memory deltas,
         uint256 deltaCount
     ) internal override(SettlementBase, SettlementExecutor) returns (uint256) {
-        return SettlementBase._executeIntent(callerAddress, settlementData, fillerCalldata, deltas, deltaCount);
+        return SettlementBase._executeIntent(orderSigner, settlementData, fillerCalldata, deltas, deltaCount);
     }
 
     function _postSettlementCheck(
-        address callerAddress,
+        address orderSigner,
         bytes memory settlementData,
         uint256 riskyLenderMask
     ) internal view override(SettlementBase, SettlementExecutor) {
-        SettlementBase._postSettlementCheck(callerAddress, settlementData, riskyLenderMask);
+        SettlementBase._postSettlementCheck(orderSigner, settlementData, riskyLenderMask);
     }
 }

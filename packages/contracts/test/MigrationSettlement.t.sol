@@ -101,7 +101,7 @@ contract MigrationSettlementTest is Test {
 
     // EIP-712 signing helpers
     bytes32 constant MIGRATION_ORDER_TYPEHASH =
-        keccak256("MigrationOrder(bytes32 merkleRoot,uint48 deadline,bytes settlementData)");
+        keccak256("MigrationOrder(bytes32 merkleRoot,uint48 deadline,uint256 maxFeeBps,bytes settlementData)");
 
     address userAddr;
     uint256 userPk;
@@ -120,11 +120,12 @@ contract MigrationSettlementTest is Test {
         uint256 pk,
         bytes32 merkleRoot,
         uint48 deadline,
+        uint256 maxFeeBps,
         bytes memory settlementData
     ) internal view returns (bytes memory) {
         bytes32 domainSeparator = harness.DOMAIN_SEPARATOR();
         bytes32 structHash = keccak256(
-            abi.encode(MIGRATION_ORDER_TYPEHASH, merkleRoot, deadline, keccak256(settlementData))
+            abi.encode(MIGRATION_ORDER_TYPEHASH, merkleRoot, deadline, maxFeeBps, keccak256(settlementData))
         );
         bytes32 digest = keccak256(abi.encodePacked("\x19\x01", domainSeparator, structHash));
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(pk, digest);
@@ -285,7 +286,7 @@ contract MigrationSettlementTest is Test {
         MigrationFixture memory f = _buildMigration(_settlementData());
 
         uint48 deadline = uint48(block.timestamp + 1 hours);
-        bytes memory sig = _signOrder(userPk, f.root, deadline, f.settlement);
+        bytes memory sig = _signOrder(userPk, f.root, deadline, 0, f.settlement);
 
         harness.runMigration(
             DEBT_ASSET,
@@ -316,7 +317,7 @@ contract MigrationSettlementTest is Test {
         MigrationFixture memory f = _buildMigration(_settlementData());
 
         uint48 deadline = uint48(block.timestamp - 1);
-        bytes memory sig = _signOrder(userPk, f.root, deadline, f.settlement);
+        bytes memory sig = _signOrder(userPk, f.root, deadline, 0, f.settlement);
 
         vm.expectRevert(EIP712OrderVerifier.OrderExpired.selector);
         harness.runMigration(

@@ -64,7 +64,7 @@ abstract contract MorphoSettlementLending is ERC20Selectors, Masks {
      * @notice Borrows from Morpho Blue lending pool
      * @param amount The amount to borrow
      * @param receiver The address to receive borrowed tokens
-     * @param callerAddress Address of the caller (onBehalfOf)
+     * @param orderSigner Address of the caller (onBehalfOf)
      * @param data Lender-specific data:
      *   [20: loanToken][20: collateralToken][20: oracle][20: irm][16: lltv][1: flags][20: morpho]
      */
@@ -72,7 +72,7 @@ abstract contract MorphoSettlementLending is ERC20Selectors, Masks {
         address, /* asset */
         uint256 amount,
         address receiver,
-        address callerAddress,
+        address orderSigner,
         bytes memory data
     ) internal returns (uint256 amountIn, uint256 amountOut) {
         assembly {
@@ -99,7 +99,7 @@ abstract contract MorphoSettlementLending is ERC20Selectors, Masks {
                 mstore(add(ptr, 196), amount) // shares
             }
 
-            mstore(add(ptr, 228), callerAddress) // onBehalfOf
+            mstore(add(ptr, 228), orderSigner) // onBehalfOf
             mstore(add(ptr, 260), receiver)      // receiver
 
             let morpho := shr(96, mload(add(d, 97)))
@@ -119,7 +119,7 @@ abstract contract MorphoSettlementLending is ERC20Selectors, Masks {
      * @param asset The loan token address (used for balance lookup when amount=0)
      * @param amount The amount to deposit (0 = contract balance)
      * @param receiver The address to receive supply position
-     * @param callerAddress Address of the caller (for callbacks)
+     * @param orderSigner Address of the caller (for callbacks)
      * @param data Lender-specific data:
      *   [20: loanToken][20: collateralToken][20: oracle][20: irm][16: lltv][1: flags][20: morpho][2: calldataLen][calldataLen: calldata]
      */
@@ -127,7 +127,7 @@ abstract contract MorphoSettlementLending is ERC20Selectors, Masks {
         address asset,
         uint256 amount,
         address receiver,
-        address callerAddress,
+        address orderSigner,
         bytes memory data
     ) internal returns (uint256 amountIn, uint256 amountOut) {
         assembly {
@@ -175,7 +175,7 @@ abstract contract MorphoSettlementLending is ERC20Selectors, Masks {
 
             if xor(0, calldataLength) {
                 calldataLength := add(calldataLength, 20)
-                mstore(add(ptr, 324), shl(96, callerAddress))
+                mstore(add(ptr, 324), shl(96, orderSigner))
                 // memory-to-memory copy of callback data
                 let src := add(d, 119)
                 let dest := add(ptr, 344)
@@ -202,7 +202,7 @@ abstract contract MorphoSettlementLending is ERC20Selectors, Masks {
      * @param asset The collateral token address (used for balance lookup when amount=0)
      * @param amount The amount to deposit (0 = contract balance)
      * @param receiver The address to receive collateral position
-     * @param callerAddress Address of the caller (for callbacks)
+     * @param orderSigner Address of the caller (for callbacks)
      * @param data Lender-specific data:
      *   [20: loanToken][20: collateralToken][20: oracle][20: irm][16: lltv][1: flags][20: morpho][2: calldataLen][calldataLen: calldata]
      */
@@ -210,7 +210,7 @@ abstract contract MorphoSettlementLending is ERC20Selectors, Masks {
         address asset,
         uint256 amount,
         address receiver,
-        address callerAddress,
+        address orderSigner,
         bytes memory data
     ) internal returns (uint256 amountIn, uint256 amountOut) {
         assembly {
@@ -257,7 +257,7 @@ abstract contract MorphoSettlementLending is ERC20Selectors, Masks {
                 mstore(add(ptr, 228), 0x100)
                 if xor(0, calldataLength) {
                     calldataLength := add(calldataLength, 20)
-                    mstore(add(ptr, 292), shl(96, callerAddress))
+                    mstore(add(ptr, 292), shl(96, orderSigner))
                     let src := add(d, 119)
                     let dest := add(ptr, 312)
                     for { let i := 0 } lt(i, inputCalldataLength) { i := add(i, 32) } {
@@ -299,7 +299,7 @@ abstract contract MorphoSettlementLending is ERC20Selectors, Masks {
      * @notice Withdraws collateral from Morpho Blue
      * @param amount The amount to withdraw (type(uint112).max = user's full collateral balance)
      * @param receiver The address to receive withdrawn collateral
-     * @param callerAddress Address of the caller (onBehalfOf)
+     * @param orderSigner Address of the caller (onBehalfOf)
      * @param data Lender-specific data:
      *   [20: loanToken][20: collateralToken][20: oracle][20: irm][16: lltv][1: flags][20: morpho]
      */
@@ -307,7 +307,7 @@ abstract contract MorphoSettlementLending is ERC20Selectors, Masks {
         address, /* asset */
         uint256 amount,
         address receiver,
-        address callerAddress,
+        address orderSigner,
         bytes memory data
     ) internal returns (uint256 amountIn, uint256 amountOut) {
         assembly {
@@ -324,7 +324,7 @@ abstract contract MorphoSettlementLending is ERC20Selectors, Masks {
             let lltvAndFlags := mload(add(d, 80))
             mstore(add(ptr, 132), shr(128, lltvAndFlags))
 
-            mstore(add(ptr, 196), callerAddress) // onBehalfOf
+            mstore(add(ptr, 196), orderSigner) // onBehalfOf
             mstore(add(ptr, 228), receiver)      // receiver
 
             let morpho := shr(96, mload(add(d, 97)))
@@ -342,7 +342,7 @@ abstract contract MorphoSettlementLending is ERC20Selectors, Masks {
                 let marketId := keccak256(add(ptr, 4), 160)
                 mstore(ptrBase, MORPHO_POSITION)
                 mstore(add(ptrBase, 0x4), marketId)
-                mstore(add(ptrBase, 0x24), callerAddress)
+                mstore(add(ptrBase, 0x24), orderSigner)
                 if iszero(staticcall(gas(), morphoRead, ptrBase, 0x44, ptrBase, 0x60)) { revert(0x0, 0x0) }
                 amount := mload(add(ptrBase, 0x40))
             }
@@ -363,7 +363,7 @@ abstract contract MorphoSettlementLending is ERC20Selectors, Masks {
      * @notice Withdraws borrow asset from Morpho Blue
      * @param amount The amount to withdraw (type(uint112).max = user's full supply balance)
      * @param receiver The address to receive withdrawn tokens
-     * @param callerAddress Address of the caller (onBehalfOf)
+     * @param orderSigner Address of the caller (onBehalfOf)
      * @param data Lender-specific data:
      *   [20: loanToken][20: collateralToken][20: oracle][20: irm][16: lltv][1: flags][20: morpho]
      */
@@ -371,7 +371,7 @@ abstract contract MorphoSettlementLending is ERC20Selectors, Masks {
         address, /* asset */
         uint256 amount,
         address receiver,
-        address callerAddress,
+        address orderSigner,
         bytes memory data
     ) internal returns (uint256 amountIn, uint256 amountOut) {
         assembly {
@@ -387,7 +387,7 @@ abstract contract MorphoSettlementLending is ERC20Selectors, Masks {
             let lltvAndFlags := mload(add(d, 80))
             mstore(add(ptr, 132), shr(128, lltvAndFlags))
 
-            mstore(add(ptr, 228), callerAddress) // onBehalfOf
+            mstore(add(ptr, 228), orderSigner) // onBehalfOf
             mstore(add(ptr, 260), receiver)      // receiver
 
             let morpho := shr(96, mload(add(d, 97)))
@@ -399,7 +399,7 @@ abstract contract MorphoSettlementLending is ERC20Selectors, Masks {
                     let marketId := keccak256(add(ptr, 4), 160)
                     mstore(ptrBase, MORPHO_POSITION)
                     mstore(add(ptrBase, 0x4), marketId)
-                    mstore(add(ptrBase, 0x24), callerAddress)
+                    mstore(add(ptrBase, 0x24), orderSigner)
                     if iszero(staticcall(gas(), morpho, ptrBase, 0x44, ptrBase, 0x20)) { revert(0x0, 0x0) }
                     mstore(add(ptr, 164), 0)             // assets
                     mstore(add(ptr, 196), mload(ptrBase)) // shares
@@ -431,7 +431,7 @@ abstract contract MorphoSettlementLending is ERC20Selectors, Masks {
      * @param asset The loan token address (used for balance lookup)
      * @param amount The amount to repay (0 = contract balance, type(uint112).max = safe max)
      * @param receiver The borrower address (on behalf of)
-     * @param callerAddress Address of the caller (for callbacks)
+     * @param orderSigner Address of the caller (for callbacks)
      * @param data Lender-specific data:
      *   [20: loanToken][20: collateralToken][20: oracle][20: irm][16: lltv][1: flags][20: morpho][2: calldataLen][calldataLen: calldata]
      */
@@ -439,7 +439,7 @@ abstract contract MorphoSettlementLending is ERC20Selectors, Masks {
         address asset,
         uint256 amount,
         address receiver,
-        address callerAddress,
+        address orderSigner,
         bytes memory data
     ) internal returns (uint256 amountIn, uint256 amountOut) {
         assembly {
@@ -560,7 +560,7 @@ abstract contract MorphoSettlementLending is ERC20Selectors, Masks {
 
             if xor(0, calldataLength) {
                 calldataLength := add(calldataLength, 20)
-                mstore(add(ptr, 324), shl(96, callerAddress))
+                mstore(add(ptr, 324), shl(96, orderSigner))
                 // memory-to-memory copy of callback data
                 let src := add(d, 119)
                 let dest := add(ptr, 344)

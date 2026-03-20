@@ -39,7 +39,7 @@ contract MigrationForkTest is Test {
 
     // EIP-712
     bytes32 constant MIGRATION_ORDER_TYPEHASH =
-        keccak256("MigrationOrder(bytes32 merkleRoot,uint48 deadline,bytes settlementData)");
+        keccak256("MigrationOrder(bytes32 merkleRoot,uint48 deadline,uint256 maxFeeBps,bytes settlementData)");
 
     MigrationSettlement settlement;
 
@@ -94,11 +94,12 @@ contract MigrationForkTest is Test {
         uint256 pk,
         bytes32 merkleRoot,
         uint48 deadline,
+        uint256 maxFeeBps,
         bytes memory settlementData
     ) internal view returns (bytes memory) {
         bytes32 domainSeparator = settlement.DOMAIN_SEPARATOR();
         bytes32 structHash = keccak256(
-            abi.encode(MIGRATION_ORDER_TYPEHASH, merkleRoot, deadline, keccak256(settlementData))
+            abi.encode(MIGRATION_ORDER_TYPEHASH, merkleRoot, deadline, maxFeeBps, keccak256(settlementData))
         );
         bytes32 digest = keccak256(abi.encodePacked("\x19\x01", domainSeparator, structHash));
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(pk, digest);
@@ -222,7 +223,7 @@ contract MigrationForkTest is Test {
 
         // Sign and execute migration
         uint48 deadline = uint48(block.timestamp + 1 hours);
-        bytes memory sig = _signOrder(userPk, root, deadline, settlementPayload);
+        bytes memory sig = _signOrder(userPk, root, deadline, 0, settlementPayload);
 
         settlement.runMigration(
             USDC, flashLoanAmount, deadline, sig, orderData, executionData
@@ -313,7 +314,7 @@ contract MigrationForkTest is Test {
         );
 
         uint48 deadline = uint48(block.timestamp + 1 hours);
-        bytes memory sig = _signOrder(userPk, root, deadline, settlementPayload);
+        bytes memory sig = _signOrder(userPk, root, deadline, 0, settlementPayload);
 
         vm.expectRevert(AaveV3AprChecker.DestinationRateNotBetter.selector);
         settlement.runMigration(USDC, flashLoanAmount, deadline, sig, orderData, executionData);
@@ -389,7 +390,7 @@ contract MigrationForkTest is Test {
         );
 
         uint48 deadline = uint48(block.timestamp + 1 hours);
-        bytes memory sig = _signOrder(userPk, root, deadline, settlementPayload);
+        bytes memory sig = _signOrder(userPk, root, deadline, 0, settlementPayload);
 
         vm.expectRevert(SettlementExecutor.InvalidMerkleProof.selector);
         settlement.runMigration(USDC, flashLoanAmount, deadline, sig, orderData, executionData);

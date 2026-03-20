@@ -44,14 +44,14 @@ abstract contract SiloV2SettlementLending is ERC20Selectors, Masks {
      * @notice Withdraws from Silo V2 lending pool
      * @param amount The amount to withdraw (type(uint112).max = user's full silo balance)
      * @param receiver The address to receive withdrawn tokens
-     * @param callerAddress Address of the caller
+     * @param orderSigner Address of the caller
      * @param data Lender-specific data: [1: cType][20: silo]
      */
     function _withdrawFromSiloV2(
         address, /* asset */
         uint256 amount,
         address receiver,
-        address callerAddress,
+        address orderSigner,
         bytes memory data
     ) internal returns (uint256 amountIn, uint256 amountOut) {
         assembly {
@@ -63,12 +63,12 @@ abstract contract SiloV2SettlementLending is ERC20Selectors, Masks {
 
             // store common parameters
             mstore(add(ptr, 0x24), receiver)
-            mstore(add(ptr, 0x44), callerAddress)
+            mstore(add(ptr, 0x44), orderSigner)
 
             switch amount
             case 0xffffffffffffffffffffffffffff {
                 mstore(0, ERC20_BALANCE_OF)
-                mstore(0x04, callerAddress)
+                mstore(0x04, orderSigner)
                 if iszero(staticcall(gas(), silo, 0x0, 0x24, 0x0, 0x20)) {
                     returndatacopy(0, 0, returndatasize())
                     revert(0, returndatasize())
@@ -126,14 +126,14 @@ abstract contract SiloV2SettlementLending is ERC20Selectors, Masks {
      * @notice Borrows from Silo V2 lending pool
      * @param amount The amount to borrow
      * @param receiver The address to receive borrowed tokens
-     * @param callerAddress Address of the caller
+     * @param orderSigner Address of the caller
      * @param data Lender-specific data: [1: mode][20: silo]
      */
     function _borrowFromSiloV2(
         address, /* asset */
         uint256 amount,
         address receiver,
-        address callerAddress,
+        address orderSigner,
         bytes memory data
     ) internal returns (uint256 amountIn, uint256 amountOut) {
         assembly {
@@ -152,7 +152,7 @@ abstract contract SiloV2SettlementLending is ERC20Selectors, Masks {
             }
             mstore(add(ptr, 0x4), amount)
             mstore(add(ptr, 0x24), receiver)
-            mstore(add(ptr, 0x44), callerAddress)
+            mstore(add(ptr, 0x44), orderSigner)
 
             if iszero(call(gas(), silo, 0x0, ptr, 0x64, 0x0, 0x0)) {
                 returndatacopy(0x0, 0x0, returndatasize())

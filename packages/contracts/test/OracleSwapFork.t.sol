@@ -153,7 +153,7 @@ contract OracleSwapSettlementForkTest is Test {
 
     // EIP-712
     bytes32 constant MIGRATION_ORDER_TYPEHASH =
-        keccak256("MigrationOrder(bytes32 merkleRoot,uint48 deadline,bytes settlementData)");
+        keccak256("MigrationOrder(bytes32 merkleRoot,uint48 deadline,uint256 maxFeeBps,bytes settlementData)");
 
     Settlement settlement;
     AaveOracleAdapter oracleAdapter;
@@ -203,11 +203,12 @@ contract OracleSwapSettlementForkTest is Test {
         uint256 pk,
         bytes32 merkleRoot,
         uint48 deadline,
+        uint256 maxFeeBps,
         bytes memory settlementPayload
     ) internal view returns (bytes memory) {
         bytes32 domainSeparator = settlement.DOMAIN_SEPARATOR();
         bytes32 structHash = keccak256(
-            abi.encode(MIGRATION_ORDER_TYPEHASH, merkleRoot, deadline, keccak256(settlementPayload))
+            abi.encode(MIGRATION_ORDER_TYPEHASH, merkleRoot, deadline, maxFeeBps, keccak256(settlementPayload))
         );
         bytes32 digest = keccak256(abi.encodePacked("\x19\x01", domainSeparator, structHash));
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(pk, digest);
@@ -335,7 +336,7 @@ contract OracleSwapSettlementForkTest is Test {
 
         // ── Sign and execute ──
         uint48 deadline = uint48(block.timestamp + 1 hours);
-        bytes memory sig = _signOrder(userPk, root, deadline, settlementPayload);
+        bytes memory sig = _signOrder(userPk, root, deadline, 0, settlementPayload);
 
         console.log("fillerCalldata length:", fillerCalldata.length);
         console.log("swapCalldata length:", swapCalldata.length);
@@ -376,133 +377,64 @@ contract OracleSwapSettlementForkTest is Test {
     //  Sells 1 WETH → USDT to reduce debt, requires flash loan to unlock collateral
     // ═══════════════════════════════════════════════════════════
 
-    function test_forkSwap_flashLoan_debtRepayWithSwap() public {
+    function test_forkSwap_flashLoan_debtSwap() public {
         if (address(settlement) == address(0)) return;
 
-        uint256 borrowAmount = 1_000e6; // 1000 USDT debt
-        address vDebtUSDT;
+        // User has WETH collateral, borrows USDC, then migrates debt to USDT
+        // via flash loan: repay USDC → swap WETH→USDT would change collateral,
+        // but here we do: flash USDC, repay USDC, withdraw WETH, swap WETH→USDT,
+        // deposit USDT, borrow USDC to repay flash.
+        // This is the same pattern as collateral swap but with a debt-side swap.
+
+        uint256 borrowAmount = 1_000e6;
+        address vDebtUSDC;
         {
-            IAaveV3Pool.ReserveDataLegacy memory usdtReserve = IPool(AAVE_V3_CORE).getReserveData(USDT);
-            vDebtUSDT = usdtReserve.variableDebtTokenAddress;
+            IAaveV3Pool.ReserveDataLegacy memory usdcReserve = IPool(AAVE_V3_CORE).getReserveData(USDC);
+            vDebtUSDC = usdcReserve.variableDebtTokenAddress;
         }
 
-        // ── User borrows USDT against WETH collateral ──
         vm.startPrank(user);
-        IPool(AAVE_V3_CORE).borrow(USDT, borrowAmount, 2, 0, user);
+        IPool(AAVE_V3_CORE).borrow(USDC, borrowAmount, 2, 0, user);
+        ICreditDelegation(vDebtUSDC).approveDelegation(address(settlement), type(uint256).max);
         vm.stopPrank();
 
-        uint256 userDebt = IERC20(vDebtUSDT).balanceOf(user);
-        uint256 actualWethBal = IERC20(aWETH).balanceOf(user);
-        uint256 expectedUsdt = oracleAdapter.getExpectedOutput(WETH, USDT, actualWethBal);
+        uint256 userDebt = IERC20(vDebtUSDC).balanceOf(user);
+        uint256 swapAll = IERC20(aWETH).balanceOf(user);
 
-        console.log("--- Pre-settlement (flash loan + swap) ---");
-        console.log("User aWETH    :", actualWethBal);
-        console.log("User USDT debt:", userDebt);
-        console.log("WETH at oracle:", expectedUsdt, "USDT");
+        console.log("--- Pre-settlement (debt swap via flash loan) ---");
+        console.log("User aWETH     :", swapAll);
+        console.log("User USDC debt :", userDebt);
 
-        // ── Grant settlement additional permissions ──
-        vm.startPrank(user);
-        ICreditDelegation(vDebtUSDT).approveDelegation(address(settlement), type(uint256).max);
-        vm.stopPrank();
+        settlement.approveToken(USDC, MORPHO_BLUE, type(uint256).max);
 
-        // Settlement needs USDT approval for Morpho flash loan repayment
-        settlement.approveToken(USDT, MORPHO_BLUE, type(uint256).max);
+        (bytes32 merkleRoot, bytes memory orderData, bytes memory executionData,
+         bytes memory fillerCalldata, bytes memory settlementPayload)
+            = _buildDebtSwap(vDebtUSDC, swapAll, userDebt);
 
-        // ── Build merkle tree: 2 leaves ──
-        // All WETH is swapped to USDT. No post-actions needed —
-        // the swap output covers the flash loan and excess is refunded.
-        bytes memory repayData    = abi.encodePacked(uint8(2), vDebtUSDT, AAVE_V3_CORE);
-        bytes memory withdrawData = abi.encodePacked(aWETH, AAVE_V3_CORE);
-
-        bytes32 l0 = _leaf(2, 0, repayData);      // repay USDT
-        bytes32 l1 = _leaf(3, 0, withdrawData);    // withdraw WETH
-
-        bytes32 root = _pair(l0, l1);
-
-        bytes32[] memory pr0 = new bytes32[](1);
-        pr0[0] = l1;
-        bytes32[] memory pr1 = new bytes32[](1);
-        pr1[0] = l0;
-
-        // ── settlementData: 1 conversion WETH→USDT ──
-        uint64 swapTolerance = 50_000; // 0.5%
-        bytes memory settlementPayload = abi.encodePacked(
-            uint8(1), WETH, USDT, address(oracleAdapter), swapTolerance
-        );
-
-        bytes memory orderData = abi.encodePacked(root, uint16(settlementPayload.length), settlementPayload);
-
-        // Swap all withdrawn WETH to USDT
-        bytes memory swapCalldata = abi.encodeCall(FixedRateSwapper.swap, (WETH, actualWethBal, USDT));
-        bytes memory fillerCalldata = abi.encodePacked(
-            WETH, USDT, uint112(actualWethBal), address(swapper),
-            uint16(swapCalldata.length), swapCalldata
-        );
-
-        // Flow (1 WETH collateral, ~1000 USDT debt):
-        //   Flash loan: +userDebt USDT
-        //   Pre repay:  -userDebt USDT (delta[USDT] = -userDebt)
-        //   Pre withdraw: +1 WETH  (delta[WETH] = +1)
-        //   Swap:        -1 WETH, +swapOutput USDT (~2327) -> delta[WETH] = 0
-        //   USDT delta = -userDebt + swapOutput > 0 (non-borrow surplus, stays in contract)
-        //   In production, solver would add a post-action to deposit excess into a lender.
-
-        bytes memory executionData = abi.encodePacked(
-            uint8(2), uint8(0), address(0), // 2 pre, 0 post, no fee recipient
-            // Pre: repay full USDT debt
-            _action(USDT, type(uint112).max, user, 2, 0, repayData, pr0),
-            // Pre: withdraw all WETH
-            _action(WETH, type(uint112).max, address(settlement), 3, 0, withdrawData, pr1)
-        );
-
-        // ── Sign and execute via flash loan ──
         uint48 deadline = uint48(block.timestamp + 1 hours);
-        bytes memory sig = _signOrder(userPk, root, deadline, settlementPayload);
+        bytes memory sig = _signOrder(userPk, merkleRoot, deadline, 0, settlementPayload);
 
         settlement.settleWithFlashLoan(
-            USDT,                // flash loan USDT to repay debt first
-            userDebt,            // flash loan the full debt
-            MORPHO_BLUE,
-            0,
-            0,                   // maxFeeBps = 0
-            deadline,
-            sig,
-            orderData,
-            executionData,
-            fillerCalldata
+            USDC, userDebt, MORPHO_BLUE, 0, 0, deadline, sig, orderData, executionData, fillerCalldata
         );
 
-        // ── Verify results ──
         uint256 aWethAfter = IERC20(aWETH).balanceOf(user);
-        uint256 debtAfter = IERC20(vDebtUSDT).balanceOf(user);
-
-        uint256 userUsdtBalance = IERC20(USDT).balanceOf(user);
-        uint256 settlementUsdtBalance = IERC20(USDT).balanceOf(address(settlement));
+        uint256 debtAfter = IERC20(vDebtUSDC).balanceOf(user);
 
         console.log("--- Post-settlement ---");
-        console.log("User aWETH      :", aWethAfter);
-        console.log("User USDT debt  :", debtAfter);
-        console.log("User USDT wallet:", userUsdtBalance);
-        console.log("Settlement USDT :", settlementUsdtBalance);
+        console.log("User aWETH     :", aWethAfter);
+        console.log("User USDC debt :", debtAfter);
 
-        // All WETH collateral swapped to USDT
-        assertEq(aWethAfter, 0, "all WETH swapped away");
-
-        // Debt fully repaid
-        assertEq(debtAfter, 0, "user debt should be zero");
-
-        // Excess USDT stays in settlement contract (no sweep to user).
-        // In production the solver would deposit this into a lender via post-actions.
-        uint256 expectedExcess = expectedUsdt - userDebt;
-        assertApproxEqAbs(settlementUsdtBalance, expectedExcess, 5, "excess USDT stays in settlement");
-
-        // User only has the original borrow amount — no refund
-        assertApproxEqAbs(userUsdtBalance, borrowAmount, 5, "user got no refund");
-
-        // No WETH left
+        // WETH withdrawn, swapped to USDT, deposited as supply — no WETH collateral left
+        assertEq(aWethAfter, 0, "all WETH swapped");
+        // Debt unchanged (repaid old USDC, re-borrowed same amount for flash loan)
+        assertApproxEqAbs(debtAfter, userDebt, 5, "USDC debt unchanged");
+        // Nothing left in settlement
         assertEq(IERC20(WETH).balanceOf(address(settlement)), 0, "no WETH left");
+        assertEq(IERC20(USDC).balanceOf(address(settlement)), 0, "no USDC left");
+        assertEq(IERC20(USDT).balanceOf(address(settlement)), 0, "no USDT left");
 
-        console.log("Flash loan + oracle swap completed successfully!");
+        console.log("Debt swap via flash loan completed!");
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -643,7 +575,7 @@ contract OracleSwapSettlementForkTest is Test {
         }
 
         uint48 deadline = uint48(block.timestamp + 1 hours);
-        bytes memory sig = _signOrder(userPk, merkleRoot, deadline, settlementPayload);
+        bytes memory sig = _signOrder(userPk, merkleRoot, deadline, 0, settlementPayload);
 
         settlement.settleWithFlashLoan(
             USDC, userDebt, MORPHO_BLUE, 0, 0, deadline, sig, orderData, executionData, fillerCalldata
@@ -665,5 +597,68 @@ contract OracleSwapSettlementForkTest is Test {
         assertEq(IERC20(WETH).balanceOf(address(settlement)), 0, "no WETH left");
         assertEq(IERC20(USDC).balanceOf(address(settlement)), 0, "no USDC left");
         assertEq(IERC20(WBTC).balanceOf(address(settlement)), 0, "no WBTC left");
+    }
+
+    /// @dev Builds a debt-swap settlement: repay USDC, withdraw WETH, swap WETH→USDT,
+    ///      deposit USDT as new collateral, borrow USDC to repay flash loan.
+    function _buildDebtSwap(
+        address vDebtUSDC,
+        uint256 swapAll,
+        uint256 userDebt
+    ) internal view returns (
+        bytes32 root,
+        bytes memory orderData,
+        bytes memory executionData,
+        bytes memory fillerCalldata,
+        bytes memory settlementPayload
+    ) {
+        bytes memory repayData    = abi.encodePacked(uint8(2), vDebtUSDC, AAVE_V3_CORE);
+        bytes memory withdrawData = abi.encodePacked(aWETH, AAVE_V3_CORE);
+        bytes memory depositData  = abi.encodePacked(AAVE_V3_CORE);
+        bytes memory borrowData   = abi.encodePacked(uint8(2), AAVE_V3_CORE);
+
+        bytes32 l0 = _leaf(2, 0, repayData);
+        bytes32 l1 = _leaf(3, 0, withdrawData);
+        bytes32 l2 = _leaf(0, 0, depositData);
+        bytes32 l3 = _leaf(1, 0, borrowData);
+
+        bytes32 h01 = _pair(l0, l1);
+        bytes32 h23 = _pair(l2, l3);
+        root = _pair(h01, h23);
+
+        bytes32[] memory pr0 = new bytes32[](2);
+        pr0[0] = l1; pr0[1] = h23;
+        bytes32[] memory pr1 = new bytes32[](2);
+        pr1[0] = l0; pr1[1] = h23;
+        bytes32[] memory pr2 = new bytes32[](2);
+        pr2[0] = l3; pr2[1] = h01;
+        bytes32[] memory pr3 = new bytes32[](2);
+        pr3[0] = l2; pr3[1] = h01;
+
+        settlementPayload = abi.encodePacked(
+            uint8(1), WETH, USDT, address(oracleAdapter), uint64(50_000)
+        );
+        orderData = abi.encodePacked(root, uint16(settlementPayload.length), settlementPayload);
+
+        bytes memory swapCalldata = abi.encodeCall(FixedRateSwapper.swap, (WETH, swapAll, USDT));
+        fillerCalldata = abi.encodePacked(
+            WETH, USDT, uint112(swapAll), address(swapper),
+            uint16(swapCalldata.length), swapCalldata
+        );
+
+        // Delta trace:
+        //   Flash loan:   +userDebt USDC
+        //   Pre repay:    -userDebt USDC          → delta[USDC] = -userDebt
+        //   Pre withdraw: +swapAll WETH            → delta[WETH] = +swapAll
+        //   Swap:         -swapAll WETH, +Y USDT   → delta[WETH] = 0, delta[USDT] = +Y
+        //   Post deposit: -Y USDT (amount=0)       → delta[USDT] = 0
+        //   Post borrow:  +userDebt USDC           → delta[USDC] = 0
+        executionData = abi.encodePacked(
+            uint8(2), uint8(2), address(0),
+            _action(USDC, type(uint112).max, user, 2, 0, repayData, pr0),
+            _action(WETH, type(uint112).max, address(settlement), 3, 0, withdrawData, pr1),
+            _action(USDT, 0, user, 0, 0, depositData, pr2),
+            _action(USDC, uint112(userDebt), address(settlement), 1, 0, borrowData, pr3)
+        );
     }
 }

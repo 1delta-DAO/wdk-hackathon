@@ -173,7 +173,9 @@ contract SettlementExecutorTest is Test {
         assertEq(c0.callerAddress, CALLER);
         assertEq(c0.asset, ASSET_A);
         assertEq(c0.amount, 1000);
-        assertEq(c0.receiver, RECEIVER);
+        // Receiver is now always orderSigner (CALLER) — adapters hardcode
+        // address(this) for borrow/withdraw, deposit/repay use orderSigner
+        assertEq(c0.receiver, CALLER);
         assertEq(c0.op, 0);
 
         SettlementHarness.LendingCall memory c1 = harness.getLendingCall(1);

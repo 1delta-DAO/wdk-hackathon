@@ -13,6 +13,7 @@ import {
   getAaveTokenPermissions,
   AAVE_POOLS,
   COMPOUND_V3_POOLS,
+  MORPHO_BLUE_ADDRESSES,
 } from './data/lenders'
 import { usePermitSignatures } from './hooks/usePermitSignatures'
 import { useOrderSubmission } from './hooks/useOrderSubmission'
@@ -51,7 +52,7 @@ export default function App() {
     [activeChainId],
   )
 
-  const { markets: morphoMarkets, loading: morphoLoading } = useMorphoMarkets(activeChainId)
+  const { markets: morphoMarkets, loading: morphoLoading, error: morphoError } = useMorphoMarkets(activeChainId)
 
   const selectedLenders = useMemo(
     () => lenders.filter((l) => selectedLenderIds.has(l.id)),
@@ -64,7 +65,7 @@ export default function App() {
   )
 
   const lendersForSafety = useMemo(
-    () => selectedLenders.filter((l) => l.family === 'AAVE' || l.family === 'COMPOUND_V3'),
+    () => selectedLenders.filter((l) => l.family === 'AAVE' || l.family === 'COMPOUND_V3' || l.family === 'MORPHO_BLUE'),
     [selectedLenders],
   )
 
@@ -109,6 +110,21 @@ export default function App() {
               minHealthFactor: hf,
             })
           }
+        } else if (lender.family === 'MORPHO_BLUE') {
+          const morpho = MORPHO_BLUE_ADDRESSES[cid]
+          if (morpho && morphoMarkets.length > 0) {
+            for (const item of morphoMarkets) {
+              const mid = item.params.market.id
+              if (mid) {
+                conditions.push({
+                  lenderId: protocolToLenderId(lender.id),
+                  morpho,
+                  marketId: mid as Hex,
+                  minHealthFactor: hf,
+                })
+              }
+            }
+          }
         }
       }
     }
@@ -120,7 +136,7 @@ export default function App() {
     const orderData = encodeOrderData(merkleRoot, settlementData)
 
     return { orderData, settlementData, conditionCount: conditions.length }
-  }, [merkleRoot, activeChainId, hfMode, minHealthFactor, perLenderHealthFactor, selectedLenders, selectedTokenPerms])
+  }, [merkleRoot, activeChainId, hfMode, minHealthFactor, perLenderHealthFactor, selectedLenders, selectedTokenPerms, morphoMarkets])
 
   const handleCopyOrderData = useCallback(() => {
     if (orderData) {
@@ -297,7 +313,9 @@ export default function App() {
                         <div className="text-xs text-gray-500 mt-1">
                           {morphoLoading
                             ? 'Loading markets...'
-                            : `${morphoMarkets.length} market${morphoMarkets.length !== 1 ? 's' : ''} found (TVL > $100k)`}
+                            : morphoError
+                              ? <span className="text-red-400">Failed to load markets: {morphoError}</span>
+                              : `${morphoMarkets.length} market${morphoMarkets.length !== 1 ? 's' : ''} found (TVL > $100k)`}
                         </div>
                       </div>
                     )}
@@ -326,7 +344,7 @@ export default function App() {
           )}
 
           {/* HF (liquidation preventer) + Merkle + Order data */}
-          {activeChainId && selectedLenders.some(l => l.family === 'AAVE' || l.family === 'COMPOUND_V3') && (
+          {activeChainId && selectedLenders.some(l => l.family === 'AAVE' || l.family === 'COMPOUND_V3' || l.family === 'MORPHO_BLUE') && (
             <section className="space-y-6">
               {/* Health factor checks (Liquidation preventer) */}
               <div className="rounded-lg border border-gray-800 bg-gray-900/50 p-4">
@@ -384,7 +402,9 @@ export default function App() {
                             : lender.family === 'AAVE'
                               ? Boolean(AAVE_POOLS[lender.id]?.[cid]) &&
                                 Boolean(selectedTokenPerms[lender.id] && selectedTokenPerms[lender.id].size > 0)
-                              : false)
+                              : lender.family === 'MORPHO_BLUE'
+                                ? Boolean(MORPHO_BLUE_ADDRESSES[cid]) && morphoMarkets.length > 0
+                                : false)
 
                         return (
                           <div key={lender.id} className="flex items-center gap-3">

@@ -33,7 +33,7 @@ abstract contract EIP712OrderVerifier {
         keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)");
 
     bytes32 internal constant MIGRATION_ORDER_TYPEHASH =
-        keccak256("MigrationOrder(bytes32 merkleRoot,uint48 deadline,bytes settlementData)");
+        keccak256("MigrationOrder(bytes32 merkleRoot,uint48 deadline,uint256 maxFeeBps,bytes settlementData)");
 
     constructor() {
         _DOMAIN_SEPARATOR = keccak256(
@@ -64,10 +64,11 @@ abstract contract EIP712OrderVerifier {
     function cancelOrder(
         bytes32 merkleRoot,
         uint48 deadline,
+        uint256 maxFeeBps,
         bytes calldata settlementData
     ) external {
         bytes32 structHash = keccak256(
-            abi.encode(MIGRATION_ORDER_TYPEHASH, merkleRoot, deadline, keccak256(settlementData))
+            abi.encode(MIGRATION_ORDER_TYPEHASH, merkleRoot, deadline, maxFeeBps, keccak256(settlementData))
         );
         bytes32 digest = keccak256(abi.encodePacked("\x19\x01", _DOMAIN_SEPARATOR, structHash));
 
@@ -102,13 +103,14 @@ abstract contract EIP712OrderVerifier {
     function _recoverOrderSigner(
         bytes32 merkleRoot,
         uint48 deadline,
+        uint256 maxFeeBps,
         bytes memory settlementData,
         bytes memory signature
     ) internal view returns (address signer) {
         if (block.timestamp > deadline) revert OrderExpired();
 
         bytes32 structHash = keccak256(
-            abi.encode(MIGRATION_ORDER_TYPEHASH, merkleRoot, deadline, keccak256(settlementData))
+            abi.encode(MIGRATION_ORDER_TYPEHASH, merkleRoot, deadline, maxFeeBps, keccak256(settlementData))
         );
         bytes32 digest = keccak256(abi.encodePacked("\x19\x01", _DOMAIN_SEPARATOR, structHash));
 

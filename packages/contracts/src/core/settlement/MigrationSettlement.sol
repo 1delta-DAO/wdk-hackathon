@@ -65,7 +65,7 @@ contract MigrationSettlement is MorphoSettlementCallback, MorphoFlashLoans, Aave
             mstore(0x40, add(add(fmp, 0x20), and(add(sLen, 31), not(31))))
         }
 
-        address user = _recoverOrderSigner(merkleRoot, deadline, settlementData, signature);
+        address user = _recoverOrderSigner(merkleRoot, deadline, 0, settlementData, signature);
 
         // Callback: [20: user][1: poolId][8: maxFeeBps=0][2: orderLen][orderData][2: fillerLen=0][executionData]
         uint256 paramsLength = 1 + 8 + 2 + orderData.length + 2 + executionData.length;
@@ -94,7 +94,7 @@ contract MigrationSettlement is MorphoSettlementCallback, MorphoFlashLoans, Aave
      *          intentType == 1  →  Aave V3 borrow-rate comparison
      */
     function _executeIntent(
-        address, /* callerAddress */
+        address, /* orderSigner */
         bytes memory settlementData,
         bytes memory, /* fillerCalldata */
         AssetDelta[] memory,

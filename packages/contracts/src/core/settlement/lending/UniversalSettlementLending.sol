@@ -62,7 +62,7 @@ abstract contract UniversalSettlementLending is
 {
     /**
      * @notice Executes any lending operation across various lenders
-     * @param callerAddress Address of the caller
+     * @param orderSigner Address of the caller
      * @param asset The token address for the lending operation
      * @param amount The amount for the lending operation (0 = contract balance, type(uint112).max = max/safe max)
      * @param receiver The receiver address
@@ -74,7 +74,7 @@ abstract contract UniversalSettlementLending is
      * @return amountOut The resolved amount received/withdrawn (withdraw, borrow) or 0 (deposit, repay)
      */
     function _lendingOperations(
-        address callerAddress,
+        address orderSigner,
         address asset,
         uint256 amount,
         address receiver,
@@ -101,7 +101,7 @@ abstract contract UniversalSettlementLending is
             } else if (lender < LenderIds.UP_TO_COMPOUND_V2) {
                 (amountIn, amountOut) = _depositToCompoundV2(asset, amount, receiver, data);
             } else if (lender < LenderIds.UP_TO_MORPHO) {
-                (amountIn, amountOut) = _encodeMorphoDepositCollateral(asset, amount, receiver, callerAddress, data);
+                (amountIn, amountOut) = _encodeMorphoDepositCollateral(asset, amount, receiver, orderSigner, data);
             } else if (lender < LenderIds.UP_TO_SILO_V2) {
                 (amountIn, amountOut) = _depositToSiloV2(asset, amount, receiver, data);
             } else {
@@ -113,15 +113,15 @@ abstract contract UniversalSettlementLending is
          */
         else if (lendingOperation == LenderOps.BORROW) {
             if (lender < LenderIds.UP_TO_AAVE_V2) {
-                (amountIn, amountOut) = _borrowFromAave(asset, amount, receiver, callerAddress, data);
+                (amountIn, amountOut) = _borrowFromAave(asset, amount, receiver, orderSigner, data);
             } else if (lender < LenderIds.UP_TO_COMPOUND_V3) {
-                (amountIn, amountOut) = _borrowFromCompoundV3(asset, amount, receiver, callerAddress, data);
+                (amountIn, amountOut) = _borrowFromCompoundV3(asset, amount, receiver, orderSigner, data);
             } else if (lender < LenderIds.UP_TO_COMPOUND_V2) {
-                (amountIn, amountOut) = _borrowFromCompoundV2(asset, amount, receiver, callerAddress, data);
+                (amountIn, amountOut) = _borrowFromCompoundV2(asset, amount, receiver, orderSigner, data);
             } else if (lender < LenderIds.UP_TO_MORPHO) {
-                (amountIn, amountOut) = _morphoBorrow(asset, amount, receiver, callerAddress, data);
+                (amountIn, amountOut) = _morphoBorrow(asset, amount, receiver, orderSigner, data);
             } else if (lender < LenderIds.UP_TO_SILO_V2) {
-                (amountIn, amountOut) = _borrowFromSiloV2(asset, amount, receiver, callerAddress, data);
+                (amountIn, amountOut) = _borrowFromSiloV2(asset, amount, receiver, orderSigner, data);
             } else {
                 _invalidOperation();
             }
@@ -137,7 +137,7 @@ abstract contract UniversalSettlementLending is
             } else if (lender < LenderIds.UP_TO_COMPOUND_V2) {
                 (amountIn, amountOut) = _repayToCompoundV2(asset, amount, receiver, data);
             } else if (lender < LenderIds.UP_TO_MORPHO) {
-                (amountIn, amountOut) = _morphoRepay(asset, amount, receiver, callerAddress, data);
+                (amountIn, amountOut) = _morphoRepay(asset, amount, receiver, orderSigner, data);
             } else if (lender < LenderIds.UP_TO_SILO_V2) {
                 (amountIn, amountOut) = _repayToSiloV2(asset, amount, receiver, data);
             } else {
@@ -149,15 +149,15 @@ abstract contract UniversalSettlementLending is
          */
         else if (lendingOperation == LenderOps.WITHDRAW) {
             if (lender < LenderIds.UP_TO_AAVE_V2) {
-                (amountIn, amountOut) = _withdrawFromAave(asset, amount, receiver, callerAddress, data);
+                (amountIn, amountOut) = _withdrawFromAave(asset, amount, receiver, orderSigner, data);
             } else if (lender < LenderIds.UP_TO_COMPOUND_V3) {
-                (amountIn, amountOut) = _withdrawFromCompoundV3(asset, amount, receiver, callerAddress, data);
+                (amountIn, amountOut) = _withdrawFromCompoundV3(asset, amount, receiver, orderSigner, data);
             } else if (lender < LenderIds.UP_TO_COMPOUND_V2) {
-                (amountIn, amountOut) = _withdrawFromCompoundV2(asset, amount, receiver, callerAddress, data);
+                (amountIn, amountOut) = _withdrawFromCompoundV2(asset, amount, receiver, orderSigner, data);
             } else if (lender < LenderIds.UP_TO_MORPHO) {
-                (amountIn, amountOut) = _encodeMorphoWithdrawCollateral(asset, amount, receiver, callerAddress, data);
+                (amountIn, amountOut) = _encodeMorphoWithdrawCollateral(asset, amount, receiver, orderSigner, data);
             } else if (lender < LenderIds.UP_TO_SILO_V2) {
-                (amountIn, amountOut) = _withdrawFromSiloV2(asset, amount, receiver, callerAddress, data);
+                (amountIn, amountOut) = _withdrawFromSiloV2(asset, amount, receiver, orderSigner, data);
             } else {
                 _invalidOperation();
             }
@@ -166,13 +166,13 @@ abstract contract UniversalSettlementLending is
          * deposit lendingToken
          */
         else if (lendingOperation == LenderOps.DEPOSIT_LENDING_TOKEN) {
-            (amountIn, amountOut) = _encodeMorphoDeposit(asset, amount, receiver, callerAddress, data);
+            (amountIn, amountOut) = _encodeMorphoDeposit(asset, amount, receiver, orderSigner, data);
         }
         /**
          * withdraw lendingToken
          */
         else if (lendingOperation == LenderOps.WITHDRAW_LENDING_TOKEN) {
-            (amountIn, amountOut) = _encodeMorphoWithdraw(asset, amount, receiver, callerAddress, data);
+            (amountIn, amountOut) = _encodeMorphoWithdraw(asset, amount, receiver, orderSigner, data);
         } else {
             _invalidOperation();
         }

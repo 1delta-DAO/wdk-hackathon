@@ -127,7 +127,7 @@ contract HealthFactorForkTest is Test {
     uint256 constant MORPHO_CBBTC_LLTV = 860000000000000000;
 
     bytes32 constant MIGRATION_ORDER_TYPEHASH =
-        keccak256("MigrationOrder(bytes32 merkleRoot,uint48 deadline,bytes settlementData)");
+        keccak256("MigrationOrder(bytes32 merkleRoot,uint48 deadline,uint256 maxFeeBps,bytes settlementData)");
 
     Settlement settlement;
     AaveOracleAdapter oracleAdapter;
@@ -174,14 +174,14 @@ contract HealthFactorForkTest is Test {
         return r;
     }
 
-    function _signOrder(uint256 pk, bytes32 merkleRoot, uint48 deadline, bytes memory settlementPayload)
+    function _signOrder(uint256 pk, bytes32 merkleRoot, uint48 deadline, uint256 maxFeeBps, bytes memory settlementPayload)
         internal
         view
         returns (bytes memory)
     {
         bytes32 domainSeparator = settlement.DOMAIN_SEPARATOR();
         bytes32 structHash =
-            keccak256(abi.encode(MIGRATION_ORDER_TYPEHASH, merkleRoot, deadline, keccak256(settlementPayload)));
+            keccak256(abi.encode(MIGRATION_ORDER_TYPEHASH, merkleRoot, deadline, maxFeeBps, keccak256(settlementPayload)));
         bytes32 digest = keccak256(abi.encodePacked("\x19\x01", domainSeparator, structHash));
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(pk, digest);
         return abi.encodePacked(r, s, v);
@@ -339,7 +339,7 @@ contract HealthFactorForkTest is Test {
         uint256 flashAmount = IERC20(vDebtUSDC).balanceOf(user);
 
         uint48 deadline = uint48(block.timestamp + 1 hours);
-        bytes memory sig = _signOrder(userPk, p.merkleRoot, deadline, p.settlementPayload);
+        bytes memory sig = _signOrder(userPk, p.merkleRoot, deadline, 0, p.settlementPayload);
 
         settlement.settleWithFlashLoan(
             USDC,
@@ -389,7 +389,7 @@ contract HealthFactorForkTest is Test {
         uint256 flashAmount = IERC20(vDebtUSDC).balanceOf(user);
 
         uint48 deadline = uint48(block.timestamp + 1 hours);
-        bytes memory sig = _signOrder(userPk, p.merkleRoot, deadline, p.settlementPayload);
+        bytes memory sig = _signOrder(userPk, p.merkleRoot, deadline, 0, p.settlementPayload);
 
         vm.expectRevert(HealthFactorChecker.HealthFactorTooLow.selector);
         settlement.settleWithFlashLoan(
@@ -476,7 +476,7 @@ contract HealthFactorForkTest is Test {
         );
 
         uint48 deadline = uint48(block.timestamp + 1 hours);
-        bytes memory sig = _signOrder(userPk, root, deadline, settlementPayload);
+        bytes memory sig = _signOrder(userPk, root, deadline, 0, settlementPayload);
 
         settlement.settleWithFlashLoan(
             USDC, userDebt, MORPHO_BLUE, 0, 0, deadline, sig, orderData, executionData, fillerCalldata
@@ -528,7 +528,7 @@ contract HealthFactorForkTest is Test {
         );
 
         uint48 deadline = uint48(block.timestamp + 1 hours);
-        bytes memory sig = _signOrder(userPk, root, deadline, settlementPayload);
+        bytes memory sig = _signOrder(userPk, root, deadline, 0, settlementPayload);
 
         // Empty fillerCalldata — no swap
         settlement.settle(0, deadline, sig, orderData, executionData, "");
@@ -598,7 +598,7 @@ contract HealthFactorForkTest is Test {
 
         SettlementParams memory p = _buildCompoundV3ConditionSettlement(uint112(1.1e18));
         uint48 deadline = uint48(block.timestamp + 1 hours);
-        bytes memory sig = _signOrder(userPk, p.merkleRoot, deadline, p.settlementPayload);
+        bytes memory sig = _signOrder(userPk, p.merkleRoot, deadline, 0, p.settlementPayload);
         settlement.settle(0, deadline, sig, p.orderData, p.executionData, p.fillerCalldata);
 
         assertGt(IComet(USDC_COMET).borrowBalanceOf(user), 0, "user has Compound V3 debt");
@@ -615,7 +615,7 @@ contract HealthFactorForkTest is Test {
         // minHF = 50 would normally fail, but Compound V3 check is skipped (only Aave ops)
         SettlementParams memory p = _buildCompoundV3ConditionSettlement(uint112(50e18));
         uint48 deadline = uint48(block.timestamp + 1 hours);
-        bytes memory sig = _signOrder(userPk, p.merkleRoot, deadline, p.settlementPayload);
+        bytes memory sig = _signOrder(userPk, p.merkleRoot, deadline, 0, p.settlementPayload);
 
         // Does NOT revert — Compound V3 condition skipped because no CompV3 borrow/withdraw
         settlement.settle(0, deadline, sig, p.orderData, p.executionData, p.fillerCalldata);
@@ -629,7 +629,7 @@ contract HealthFactorForkTest is Test {
 
         SettlementParams memory p = _buildCompoundV3ConditionSettlement(uint112(100e18));
         uint48 deadline = uint48(block.timestamp + 1 hours);
-        bytes memory sig = _signOrder(userPk, p.merkleRoot, deadline, p.settlementPayload);
+        bytes memory sig = _signOrder(userPk, p.merkleRoot, deadline, 0, p.settlementPayload);
         settlement.settle(0, deadline, sig, p.orderData, p.executionData, p.fillerCalldata);
 
         console.log("Compound V3 no-debt test passed: borrowBalanceOf == 0 skips HF check");
@@ -727,7 +727,7 @@ contract HealthFactorForkTest is Test {
 
         SettlementParams memory p = _buildMorphoConditionSettlement(uint112(1.1e18));
         uint48 deadline = uint48(block.timestamp + 1 hours);
-        bytes memory sig = _signOrder(userPk, p.merkleRoot, deadline, p.settlementPayload);
+        bytes memory sig = _signOrder(userPk, p.merkleRoot, deadline, 0, p.settlementPayload);
         settlement.settle(0, deadline, sig, p.orderData, p.executionData, p.fillerCalldata);
 
         _assertMorphoPositionHealthy(1.1e18);
@@ -758,7 +758,7 @@ contract HealthFactorForkTest is Test {
         SettlementParams memory p = _buildMorphoConditionSettlement(uint112(50e18));
 
         uint48 deadline = uint48(block.timestamp + 1 hours);
-        bytes memory sig = _signOrder(userPk, p.merkleRoot, deadline, p.settlementPayload);
+        bytes memory sig = _signOrder(userPk, p.merkleRoot, deadline, 0, p.settlementPayload);
 
         // Does NOT revert — Morpho condition skipped because no Morpho borrow/withdraw
         settlement.settle(0, deadline, sig, p.orderData, p.executionData, p.fillerCalldata);
@@ -777,7 +777,7 @@ contract HealthFactorForkTest is Test {
         SettlementParams memory p = _buildMorphoConditionSettlement(uint112(100e18));
 
         uint48 deadline = uint48(block.timestamp + 1 hours);
-        bytes memory sig = _signOrder(userPk, p.merkleRoot, deadline, p.settlementPayload);
+        bytes memory sig = _signOrder(userPk, p.merkleRoot, deadline, 0, p.settlementPayload);
 
         settlement.settle(0, deadline, sig, p.orderData, p.executionData, p.fillerCalldata);
 
@@ -833,7 +833,7 @@ contract HealthFactorForkTest is Test {
         );
 
         uint48 deadline = uint48(block.timestamp + 1 hours);
-        bytes memory sig = _signOrder(userPk, root, deadline, settlementPayload);
+        bytes memory sig = _signOrder(userPk, root, deadline, 0, settlementPayload);
 
         settlement.settle(0, deadline, sig, orderData, executionData, "");
 
@@ -894,7 +894,7 @@ contract HealthFactorForkTest is Test {
         );
 
         uint48 deadline = uint48(block.timestamp + 1 hours);
-        bytes memory sig = _signOrder(userPk, root, deadline, settlementPayload);
+        bytes memory sig = _signOrder(userPk, root, deadline, 0, settlementPayload);
 
         settlement.settle(0, deadline, sig, orderData, executionData, "");
 

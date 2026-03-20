@@ -66,6 +66,7 @@ export const SettlementOrderTypedData = {
     MigrationOrder: [
       { name: 'merkleRoot', type: 'bytes32' },
       { name: 'deadline', type: 'uint48' },
+      { name: 'maxFeeBps', type: 'uint256' },
       { name: 'settlementData', type: 'bytes' },
     ],
   },
@@ -172,17 +173,20 @@ export function buildAaveDelegationMessage(params: {
 export interface SettlementOrderMessage {
   merkleRoot: Hex
   deadline: number
+  maxFeeBps: bigint
   settlementData: Hex
 }
 
 export function buildSettlementOrderMessage(params: {
   merkleRoot: Hex
   deadline: number
+  maxFeeBps?: number | bigint
   settlementData?: Hex
 }): SettlementOrderMessage {
   return {
     merkleRoot: params.merkleRoot,
     deadline: params.deadline,
+    maxFeeBps: BigInt(params.maxFeeBps ?? 0),
     settlementData: params.settlementData ?? '0x',
   }
 }
