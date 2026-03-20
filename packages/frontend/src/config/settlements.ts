@@ -2,12 +2,12 @@ import type { Address } from 'viem'
 
 /** Deployed settlement contract addresses per chain */
 export const SETTLEMENT_ADDRESSES: Record<number, Address> = {
-  42161: '0x62002C215BF3c7a1FD1f794a8e664CF5dc4F3Da2', // Arbitrum
+  42161: '0x2FA48F02923a0C93326A68aA26E3a0b836d5685F', // Arbitrum
 }
 
 /** Deployed oracle adapter addresses per chain */
 export const ORACLE_ADDRESSES: Record<number, Address> = {
-  42161: '0x4b20b77aaCe3F0BD3Be3957CD15837FfEA2a1925', // Arbitrum
+  42161: '0x2E837679425d8B32cCDc4448ddC222930Ef6ED96', // Arbitrum
 }
 
 /** Order backend URL */

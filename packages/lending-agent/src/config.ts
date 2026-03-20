@@ -13,9 +13,9 @@ export const CONTRACTS_BY_CHAIN: Record<number, {
 }> = {
   // Arbitrum One
   42161: {
-    settlement: '0x62002C215BF3c7a1FD1f794a8e664CF5dc4F3Da2',
-    forwarder:  '0xaD56e62B148cbff3A45bDc2a0dD423c4B4a1b98a',
-    aaveOracle: '0x4b20b77aaCe3F0BD3Be3957CD15837FfEA2a1925',
+    settlement: '0x2FA48F02923a0C93326A68aA26E3a0b836d5685F',
+    forwarder:  '0x42fe151e9d49995927784a91595ce5C243F26D5a',
+    aaveOracle: '0x2E837679425d8B32cCDc4448ddC222930Ef6ED96',
   },
 }
 
