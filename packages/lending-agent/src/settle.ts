@@ -206,7 +206,7 @@ export function buildSettlementTx(input: SettlementInput): {
     input.feeRecipient,
   )
 
-  const data = encodeFunctionData({
+  const settleCalldata = encodeFunctionData({
     abi: settleWithFlashLoanAbi,
     functionName: 'settleWithFlashLoan',
     args: [
@@ -222,6 +222,47 @@ export function buildSettlementTx(input: SettlementInput): {
       executionData,                           // rebuilt for chosen leaves
       '0x',                                    // no filler calldata (same-asset migration)
     ],
+  })
+
+  // Approve debt token to source repay contract and collateral to dest deposit contract.
+  // The settlement contract never holds persistent balances so this is safe and permissionless.
+  const repaySpender   = spenderFromLeaf(input.sourceRepayLeaf)
+  const depositSpender = spenderFromLeaf(input.destDepositLeaf)
+  console.log(`  approveToken: debt(${input.debtAsset}) → repaySpender(${repaySpender})`)
+  console.log(`  approveToken: collateral(${input.collateralAsset}) → depositSpender(${depositSpender})`)
+  console.log(`  approveToken: debt(${input.debtAsset}) → morphoPool(${input.morphoPool}) [flash loan repayment]`)
+
+  const approve = (token: Address, spender: Address) => encodeFunctionData({
+    abi: SETTLEMENT_ABI,
+    functionName: 'approveToken',
+    args: [token, spender, maxUint256],
+  })
+
+  // Decode permit/auth calls stored in order's fillerCalldata and prepend to multicall
+  const fillerCalls: Hex[] = []
+  const storedFiller = input.order.order.fillerCalldata
+  if (storedFiller && storedFiller !== '0x') {
+    try {
+      const [decoded] = decodeAbiParameters([{ type: 'bytes[]' }], storedFiller)
+      fillerCalls.push(...(decoded as Hex[]))
+      console.log(`  fillerCalldata: ${fillerCalls.length} authorization call(s) prepended`)
+    } catch (err) {
+      console.warn(`  Failed to decode fillerCalldata: ${err instanceof Error ? err.message : err}`)
+    }
+  }
+
+  const data = encodeFunctionData({
+    abi: SETTLEMENT_ABI,
+    functionName: 'multicall',
+    args: [[
+      ...fillerCalls,
+      approve(input.debtAsset,       repaySpender),
+      approve(input.collateralAsset, depositSpender),
+      // Morpho pulls the flash loan back via transferFrom after the callback —
+      // settlement must pre-approve the Morpho pool for the flash amount.
+      approve(input.debtAsset, input.morphoPool),
+      settleCalldata,
+    ]],
   })
 
   return { to: input.settlement, data, chainId: input.order.order.chainId, flashAmount, borrowAmount }
