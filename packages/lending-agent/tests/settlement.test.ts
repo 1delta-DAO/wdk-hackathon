@@ -167,11 +167,12 @@ describe('buildSettlementTx', () => {
     expect(tx.flashAmount).toBe(1_000_100_001n)
   })
 
-  it('borrow amount is flash amount plus fee headroom', () => {
+  it('borrow amount is debtAmount plus fee headroom', () => {
     const tx = buildSettlementTx(input)
-    // borrowAmount = flashAmount + flashAmount * maxFeeBps / 1e7
-    // maxFeeBps = 50_000, so +0.5% of flashAmount
-    const expected = tx.flashAmount + (tx.flashAmount * 50000n) / 10_000_000n
+    // borrowAmount = debtAmount + debtAmount * maxFeeBps / 1e7
+    // maxFeeBps = 50_000, so +0.5% of debtAmount
+    const debtAmount = 1_000_000_000n
+    const expected = debtAmount + (debtAmount * 50000n) / 10_000_000n
     expect(tx.borrowAmount).toBe(expected)
   })
 
@@ -210,10 +211,10 @@ describe('buildSettlementTx', () => {
     expect(tx.data.startsWith('0xac9650d8')).toBe(true)
   })
 
-  it('does NOT wrap in multicall when no permits', () => {
+  it('always wraps in multicall (approvals are always needed)', () => {
     const tx = buildSettlementTx(input)
-    // Should NOT start with multicall selector
-    expect(tx.data.startsWith('0xac9650d8')).toBe(false)
+    // multicall selector = 0xac9650d8
+    expect(tx.data.startsWith('0xac9650d8')).toBe(true)
   })
 })
 
