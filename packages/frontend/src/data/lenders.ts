@@ -37,6 +37,11 @@ export const PERMISSION_DEFS: Record<PermissionKind, PermissionDef> = {
     label: 'Credit Delegation',
     description: 'Delegate borrowing power to the settlement contract via debt tokens',
   },
+  AAVE_DELEGATION_TX: {
+    kind: 'AAVE_DELEGATION',
+    label: 'Credit Delegation',
+    description: 'Delegate borrowing power to the settlement contract via debt tokens',
+  },
   COMPOUND_V3_ALLOW: {
     kind: 'COMPOUND_V3_ALLOW',
     label: 'Manager Authorization',
