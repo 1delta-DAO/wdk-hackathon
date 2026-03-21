@@ -9,8 +9,8 @@ export const DRY_RUN: boolean = process.env.DRY_RUN === 'true'
  */
 export const ECONOMIC_MODE: boolean = process.env.ECONOMIC_MODE !== 'false'
 
-// Cap tool results to ~1500 tokens to keep context window manageable
-export const RESULT_CHAR_LIMIT = 6000
+// Cap tool results to keep context window manageable
+export const RESULT_CHAR_LIMIT = 20000
 
 export const CONTRACTS_BY_CHAIN: Record<number, {
   settlement: `0x${string}`
@@ -27,6 +27,32 @@ export const CONTRACTS_BY_CHAIN: Record<number, {
   },
 }
 
-export const RPC_URL_BY_CHAIN: Record<number, string> ={
-  42161: 'https://arb1.arbitrum.io/rpc'
+export const RPC_URL_BY_CHAIN: Record<number, string> = {
+  42161: 'https://arb1.arbitrum.io/rpc',
+}
+
+/**
+ * Compound V3 comet address → lender name mapping, keyed by chainId.
+ * Source: packages/frontend/src/data/lenders.ts (COMPOUND_V3_POOLS)
+ * Used to resolve the exact lender name (e.g. "COMPOUND_V3_USDT") from a comet address
+ * so we can match against marketUid in the lending markets API.
+ */
+export const COMPOUND_V3_COMET_TO_LENDER: Record<number, Record<string, string>> = {
+  42161: {
+    '0x9c4ec768c28520b50860ea7a15bd7213a9ff58bf': 'COMPOUND_V3_USDC',
+    '0xa5edbdd9646f8dff606d7448e414884c7d905dca': 'COMPOUND_V3_USDCE',
+    '0xd98be00b5d27fc98112bde293e487f8d4ca57d07': 'COMPOUND_V3_USDT',
+    '0x6f7d514bbd4aff3bcd1140b7344b32f063dee486': 'COMPOUND_V3_WETH',
+  },
+}
+
+/** Resolve a Compound V3 comet address to its lender name (lowercase comet address). */
+export function cometToLender(comet: string, chainId: number): string | null {
+  return COMPOUND_V3_COMET_TO_LENDER[chainId]?.[comet.toLowerCase()] ?? null
+}
+
+export const CHAIN_NAMES: Record<number, string> = {
+  1:     'ethereum',
+  42161: 'arbitrum',
+  8453:  'base',
 }

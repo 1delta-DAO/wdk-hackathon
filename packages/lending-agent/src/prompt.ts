@@ -1,78 +1,68 @@
 import { DRY_RUN } from './config.js'
-import type { LeafDescription } from './order.js'
+import type { SettlementContext, SourceInfo, DestinationInfo } from './context.js'
 
-/**
- * System prompt for the settlement agent.
- *
- * The agent sees all leaves (with indices) decoded into human-readable form,
- * fetches current positions and rates via 1delta, then calls propose_migration
- * with the chosen source/dest leaf indices and underlying token addresses.
- */
+export interface FlatOption {
+  index: number
+  source: SourceInfo
+  destination: DestinationInfo
+}
+
+/** Flatten ctx.options into all (source, dest) pairs for unambiguous agent selection. */
+export function buildFlatOptions(ctx: SettlementContext): FlatOption[] {
+  const flat: FlatOption[] = []
+  for (const opt of ctx.options) {
+    for (const dest of opt.destinations) {
+      flat.push({ index: flat.length, source: opt.source, destination: dest })
+    }
+  }
+  return flat
+}
+
 export function buildSettlementSystemPrompt(
   walletAddress: string,
-  orderSigner: string,
-  chainId: number,
-  leaves: LeafDescription[],
+  ctx: SettlementContext,
+  flat: FlatOption[],
 ): string {
   const dryRunNote = DRY_RUN
-    ? '\nDRY RUN MODE: Do NOT call propose_migration. Only fetch data and report what you would do.'
+    ? '\nDRY RUN MODE: Do NOT call propose_migration. Only report what you would do.'
     : ''
 
-  const leavesText = leaves.map(l => {
-    const fields: string[] = [`[${l.index}] op=${l.op} | protocol=${l.protocol} | lender=${l.lender}`]
-    if (l.pool)             fields.push(`pool=${l.pool}`)
-    if (l.aToken)           fields.push(`aToken=${l.aToken}`)
-    if (l.debtToken)        fields.push(`debtToken=${l.debtToken}`)
-    if (l.loanToken)        fields.push(`loanToken=${l.loanToken}`)
-    if (l.collateralToken)  fields.push(`collateralToken=${l.collateralToken}`)
-    if (l.lltv)             fields.push(`lltv=${l.lltv}`)
-    if (l.oracle)           fields.push(`oracle=${l.oracle}`)
-    if (l.morpho)           fields.push(`morpho=${l.morpho}`)
-    return fields.join(' | ')
-  }).join('\n')
+  const optionLines = flat.map(o => {
+    const imp = o.destination.improvement !== null
+      ? (o.destination.improvement > 0 ? `+${o.destination.improvement.toFixed(4)}` : o.destination.improvement.toFixed(4))
+      : 'N/A'
+    const srcNet = o.source.rates.collateralDepositRate !== null && o.source.rates.debtBorrowRate !== null
+      ? (o.source.rates.collateralDepositRate - o.source.rates.debtBorrowRate).toFixed(4)
+      : 'N/A'
+    const dstNet = o.destination.netYield !== null ? o.destination.netYield.toFixed(4) : 'N/A'
 
-  return `You are an AI settlement agent. The user has signed an order allowing specific lending operations.
-Your job is to find the best migration among the allowed options and execute it.
+    return [
+      `OPTION [${o.index}]: FROM ${o.source.lender} → TO ${o.destination.group.protocol}`,
+      `  improvement: ${imp}  (source net: ${srcNet}  dest net: ${dstNet})`,
+      `  source REPAY leaf: ${o.source.group.repayLeafIndex}  WITHDRAW leaf: ${o.source.group.withdrawLeafIndex}`,
+      `  dest   DEPOSIT leaf: ${o.destination.group.depositLeafIndex}  BORROW leaf: ${o.destination.group.borrowLeafIndex}`,
+      `  collateral: ${o.source.collateralToken}  debt: ${o.source.debtToken}`,
+    ].join('\n')
+  }).join('\n\n')
 
-CHAIN: ${chainId}
-WALLET: ${walletAddress || 'UNKNOWN — call getAddress(chain="ethereum") first'}
-ORDER SIGNER: ${orderSigner}
+  return `You are an AI settlement agent. All market data has been pre-fetched.
+Your only job: pick the best migration option and call propose_migration once with its index.
 
-AVAILABLE LEAVES (signed by the user — reference by index):
-${leavesText}
+CHAIN: ${ctx.chainId}
+WALLET: ${walletAddress || 'UNKNOWN'}
+ORDER SIGNER: ${ctx.orderSigner}
+
+MIGRATION OPTIONS:
+${optionLines}
 
 OPTIMIZATION GOAL:
-Find the source→dest combination that maximises net yield improvement:
-  best_dest(depositRate_collateral − borrowRate_debt) − current(depositRate_collateral − borrowRate_debt)
-Only consider destinations different from the user's current protocol.
-If no improvement is found, report that clearly — do not execute.
+Pick the option with the highest positive improvement value.
+improvement = dest_net_yield − source_net_yield  (higher = better)
 
-WORKFLOW:
-1. Call get_user_positions with account="${orderSigner}", chains="${chainId}" to find the current position.
-   This tells you which protocol the user is currently on and the underlying token addresses.
-2. Identify the SOURCE leaves (REPAY + WITHDRAW pair) matching the current position's protocol and pool/market.
-3. For each DESTINATION leaf pair (DEPOSIT + BORROW), call find_market twice:
-     find_market(chainId="${chainId}", tokenAddress=<collateralToken>, lender=<protocol>)
-     find_market(chainId="${chainId}", tokenAddress=<debtToken>, lender=<protocol>)
-   Pair by lender. Compute depositRate_collateral − borrowRate_debt for each dest.
-4. Also fetch the source market rates to compute current net yield.
-5. Pick the dest with the highest improvement over current.
-6. If improvement > 0, call propose_migration with:
-     sourceRepayLeafIndex    — index of the REPAY leaf for the source
-     sourceWithdrawLeafIndex — index of the WITHDRAW leaf for the source
-     destDepositLeafIndex    — index of the DEPOSIT leaf for the chosen dest
-     destBorrowLeafIndex     — index of the BORROW leaf for the chosen dest
-     collateralAsset         — underlying collateral token address (from get_user_positions)
-     debtAsset               — underlying debt token address (from get_user_positions)
-     debtAmountBaseUnits     — current debt amount as a string (from get_user_positions)
-     reason                  — one-line explanation of why this is the best option
+If the best improvement > 0, call propose_migration with that option's index.
+If no option has improvement > 0, do NOT call propose_migration.
 
 RULES:
-- Only use leaf indices from the AVAILABLE LEAVES list above.
-- Source REPAY and WITHDRAW leaves must be from the same protocol and market as the current position.
-- Dest DEPOSIT and BORROW leaves must be from the same protocol and market.
-- Do not migrate to the protocol the user is already on (no-op).
-- For Morpho: match leaves by loanToken/collateralToken pair.
-- For Aave: match leaves by pool address.
-- debtAmountBaseUnits must be passed as a string (not a number) to preserve precision.${dryRunNote}`
+- Pass the exact optionIndex from the list above.
+- reason: one-line explanation naming the protocols and improvement value.${dryRunNote}`
 }
