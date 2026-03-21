@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { useAccount, useConnect, useDisconnect, useBalance } from 'wagmi'
-import { LogOut, ChevronRight, Wallet, Copy, Check, X } from 'react-feather'
+import { LogOut, ChevronRight, Briefcase, Copy, Check, X } from 'react-feather'
 
 /** Well-known wallet connector icons (base64 SVG or emoji fallback) */
 function ConnectorIcon({ name }: { name: string }) {
@@ -23,7 +23,7 @@ function ConnectorIcon({ name }: { name: string }) {
     )
   }
   // Generic wallet icon fallback
-  return <Wallet size={20} className="text-base-content/60" />
+  return <Briefcase size={20} className="text-base-content/60" />
 }
 
 export function ConnectButton() {
@@ -80,7 +80,7 @@ export function ConnectButton() {
           onClick={() => setOpen(true)}
           className="btn btn-sm btn-primary gap-1.5"
         >
-          <Wallet size={14} />
+          <Briefcase size={14} />
           Connect
         </button>
       )}
@@ -100,7 +100,7 @@ export function ConnectButton() {
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-base-300">
           <h2 className="text-sm font-bold">
-            {isConnected ? 'Wallet' : 'Connect Wallet'}
+            {isConnected ? 'Briefcase' : 'Connect Briefcase'}
           </h2>
           <button
             onClick={() => setOpen(false)}
@@ -118,7 +118,7 @@ export function ConnectButton() {
               <div className="bg-base-300/60 rounded-lg p-3 space-y-2.5">
                 <div className="flex items-center gap-2">
                   <div className="w-8 h-8 rounded-full bg-gradient-to-br from-primary to-secondary flex items-center justify-center">
-                    <Wallet size={14} className="text-primary-content" />
+                    <Briefcase size={14} className="text-primary-content" />
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="font-mono text-xs truncate">{address}</div>
@@ -131,7 +131,7 @@ export function ConnectButton() {
                 {/* Balance */}
                 {balance && (
                   <div className="text-sm font-semibold">
-                    {parseFloat(balance.formatted).toFixed(4)} {balance.symbol}
+                    {(Number(balance.value) / 10 ** balance.decimals).toFixed(4)} {balance.symbol}
                   </div>
                 )}
 
