@@ -259,8 +259,12 @@ export function buildSettlementTx(input: SettlementInput): {
       approve(input.debtAsset,       repaySpender),
       approve(input.collateralAsset, depositSpender),
       // Morpho pulls the flash loan back via transferFrom after the callback —
-      // settlement must pre-approve the Morpho pool for the flash amount.
-      approve(input.debtAsset, input.morphoPool),
+      // settlement must pre-approve the Morpho pool for exactly the flash amount.
+      encodeFunctionData({
+        abi: SETTLEMENT_ABI,
+        functionName: 'approveToken',
+        args: [input.debtAsset, input.morphoPool, flashAmount],
+      }),
       settleCalldata,
     ]],
   })
