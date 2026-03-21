@@ -25,6 +25,16 @@ export interface MerkleLeaf {
   proof: Hex[]
 }
 
+export interface SignedPermit {
+  kind: 'ERC2612_PERMIT' | 'AAVE_DELEGATION' | 'MORPHO_AUTHORIZATION' | 'COMPOUND_V3_ALLOW'
+  targetAddress: Address
+  deadline: string  // serialized bigint
+  nonce: string     // serialized bigint
+  v: number
+  r: Hex
+  s: Hex
+}
+
 export interface StoredOrder {
   id: string
   createdAt: number
@@ -41,6 +51,7 @@ export interface StoredOrder {
     chainId: number
     maxFeeBps: number
     leaves: MerkleLeaf[]
+    permits?: SignedPermit[]
   }
 }
 

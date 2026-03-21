@@ -163,8 +163,8 @@ export default function App() {
 
   const handleSubmitOrder = useCallback(() => {
     if (!merkleRoot || !orderData) return
-    submitOrder({ merkleRoot, settlementData: encodedSettlementData, orderData, leaves: allLeaves })
-  }, [merkleRoot, orderData, encodedSettlementData, allLeaves, submitOrder])
+    submitOrder({ merkleRoot, settlementData: encodedSettlementData, orderData, leaves: allLeaves, permits: signedPermissions })
+  }, [merkleRoot, orderData, encodedSettlementData, allLeaves, submitOrder, signedPermissions])
 
   const handleChainSelect = useCallback(
     (chainId: number) => {

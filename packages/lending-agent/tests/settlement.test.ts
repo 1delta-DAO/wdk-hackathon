@@ -174,6 +174,47 @@ describe('buildSettlementTx', () => {
     const expected = tx.flashAmount + (tx.flashAmount * 50000n) / 10_000_000n
     expect(tx.borrowAmount).toBe(expected)
   })
+
+  it('wraps in multicall when permits are present', () => {
+    const inputWithPermits = {
+      ...input,
+      order: {
+        ...input.order,
+        order: {
+          ...input.order.order,
+          permits: [
+            {
+              kind: 'ERC2612_PERMIT' as const,
+              targetAddress: AAVE_ATOKEN as `0x${string}`,
+              deadline: '1700000000',
+              nonce: '0',
+              v: 27,
+              r: '0x' + 'aa'.repeat(32) as `0x${string}`,
+              s: '0x' + 'bb'.repeat(32) as `0x${string}`,
+            },
+            {
+              kind: 'AAVE_DELEGATION' as const,
+              targetAddress: AAVE_DEBT_TOKEN as `0x${string}`,
+              deadline: '1700000000',
+              nonce: '1',
+              v: 28,
+              r: '0x' + 'cc'.repeat(32) as `0x${string}`,
+              s: '0x' + 'dd'.repeat(32) as `0x${string}`,
+            },
+          ],
+        },
+      },
+    }
+    const tx = buildSettlementTx(inputWithPermits)
+    // multicall selector = 0xac9650d8
+    expect(tx.data.startsWith('0xac9650d8')).toBe(true)
+  })
+
+  it('does NOT wrap in multicall when no permits', () => {
+    const tx = buildSettlementTx(input)
+    // Should NOT start with multicall selector
+    expect(tx.data.startsWith('0xac9650d8')).toBe(false)
+  })
 })
 
 // ─── E2E: full runSettlementFlow with mocked order backend ────────────────────

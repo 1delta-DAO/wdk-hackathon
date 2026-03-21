@@ -3,6 +3,7 @@ import { useAccount, useWalletClient } from 'wagmi'
 import type { Hex } from 'viem'
 import { SETTLEMENT_ADDRESSES, ORDER_BACKEND_URL } from '../config/settlements'
 import type { GeneratedLeaf } from '../lib/merkle'
+import type { SignedPermission } from './usePermitSignatures'
 
 // EIP-712 typed data for settlement orders
 const INFINITE_ORDER_TYPES = {
@@ -20,6 +21,8 @@ interface SubmitOrderParams {
   settlementData: Hex
   orderData: Hex
   leaves: GeneratedLeaf[]
+  /** Signed permits from usePermitSignatures (aToken permits, credit delegation, Morpho auth, etc.) */
+  permits?: SignedPermission[]
   /** Deadline in seconds from now (default: 1 hour) */
   deadlineSeconds?: number
   /** Max fee in sub-basis-points (default: 0) */
@@ -85,6 +88,17 @@ export function useOrderSubmission(chainId: number | null) {
         proof: [] as Hex[], // proofs are derived from the tree, fillers can recompute
       }))
 
+      // Serialize signed permits so the solver/agent can bundle them in multicall
+      const serializedPermits = (params.permits ?? []).map(p => ({
+        kind: p.request.kind,
+        targetAddress: p.request.targetAddress,
+        deadline: p.deadline.toString(),
+        nonce: p.nonce.toString(),
+        v: p.signature.v,
+        r: p.signature.r,
+        s: p.signature.s,
+      }))
+
       const body = {
         order: {
           merkleRoot: params.merkleRoot,
@@ -97,6 +111,7 @@ export function useOrderSubmission(chainId: number | null) {
           maxFeeBps,
           solver,
           leaves: backendLeaves,
+          permits: serializedPermits,
         },
         signature,
         signer: address,
