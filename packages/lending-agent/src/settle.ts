@@ -6,22 +6,40 @@
  * via WDK sendTransaction.
  */
 
-import { encodeFunctionData, createPublicClient, http, parseAbi } from 'viem'
+import { encodeFunctionData, decodeAbiParameters, createPublicClient, http, parseAbi, maxUint256 } from 'viem'
 import type { Hex, Address } from 'viem'
 import {
   encodeExecutionData,
   AmountSentinel,
   LenderOps,
   settleWithFlashLoanAbi,
+  buildMerkleTree,
 } from '@1delta/settlement-sdk'
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import type { MerkleLeaf, StoredOrder } from './order.js'
 import { DRY_RUN, ECONOMIC_MODE, RPC_URL_BY_CHAIN, CONTRACTS_BY_CHAIN } from './config.js'
 
-// Morpho Blue flash loan pool — chain-specific, looked up from CONTRACTS_BY_CHAIN
-
 // WETH on Arbitrum — used to price ETH gas costs via the Aave oracle
 const WETH_ARB = '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1' as Address
+
+const SETTLEMENT_ABI = parseAbi([
+  'function approveToken(address token, address spender, uint256 amount) external',
+  'function multicall(bytes[] calldata data) external',
+])
+
+/**
+ * Extracts the "spender" address that needs allowance for a given leaf operation.
+ * - REPAY on Aave: pool is at bytes 21-41 (after 1-byte mode + 20-byte debtToken)
+ * - REPAY on Compound V3: comet is at bytes 0-20
+ * - DEPOSIT on Aave or Compound V3: pool/comet is at bytes 0-20
+ */
+function spenderFromLeaf(leaf: MerkleLeaf): Address {
+  const isAave = leaf.lender < 2000
+  const isRepay = leaf.op === 2 // LenderOps.REPAY
+  // Aave REPAY data: [1: mode][20: debtToken][20: pool] — pool starts at byte 21
+  const offset = isAave && isRepay ? 21 : 0
+  return `0x${leaf.data.slice(2 + offset * 2, 2 + (offset + 20) * 2)}` as Address
+}
 
 const AAVE_ORACLE_ABI = parseAbi([
   'function getAssetPrice(address asset) external view returns (uint256)',
@@ -115,11 +133,30 @@ export function buildSettlementTx(input: SettlementInput): {
   flashAmount: bigint
   borrowAmount: bigint
 } {
-  // Add 0.01% buffer to cover interest accrued between calculation and execution
-  const flashAmount = input.debtAmount + input.debtAmount / 10_000n + 1n
+  // Recompute Merkle proofs — the order backend stores leaf hashes but not proofs
+  const leafHashes = input.order.order.leaves.map(l => l.leaf as Hex)
+  const { root: recomputedRoot, proofs } = buildMerkleTree(leafHashes)
+  const signedRoot = (input.order.order as any).merkleRoot as string | undefined
+  console.log(`  Merkle root (recomputed): ${recomputedRoot}`)
+  console.log(`  Merkle root (signed):     ${signedRoot ?? '(not in order field — check orderData)'}`)
+  if (signedRoot && recomputedRoot.toLowerCase() !== signedRoot.toLowerCase()) {
+    console.warn('  ⚠ ROOT MISMATCH — proofs will be invalid!')
+  }
+  console.log(`  Proof lengths: ${proofs.map(p => p.length).join(', ')}`)
+  const proofFor = (leaf: MerkleLeaf): Hex[] => {
+    const idx = input.order.order.leaves.indexOf(leaf)
+    return idx >= 0 ? (proofs[idx] ?? []) : []
+  }
 
-  // Borrow slightly more on dest: flash loan repayment + solver fee headroom
-  const borrowAmount = flashAmount + (flashAmount * BigInt(input.order.order.maxFeeBps)) / 10_000_000n
+  // Flash amount includes a 0.01% buffer to cover interest accrued since position fetch.
+  // Skip the buffer when maxFeeBps=0 — any surplus triggers FeeExceedsMax.
+  const buffer = input.order.order.maxFeeBps > 0 ? input.debtAmount / 10_000n + 1n : 0n
+  const flashAmount = input.debtAmount + buffer
+
+  // Borrow is based on debtAmount (NOT flashAmount) so the buffer doesn't inflate the surplus.
+  // Net surplus = borrowAmount − actualDebt ≈ fee (≤ allowed by FeeExceedsMax check).
+  const fee = (input.debtAmount * BigInt(input.order.order.maxFeeBps)) / 10_000_000n
+  const borrowAmount = input.debtAmount + fee
 
   const executionData = encodeExecutionData(
     [
@@ -131,7 +168,7 @@ export function buildSettlementTx(input: SettlementInput): {
         op: LenderOps.REPAY,
         lender: input.sourceRepayLeaf.lender,
         data: input.sourceRepayLeaf.data,
-        proof: input.sourceRepayLeaf.proof,
+        proof: proofFor(input.sourceRepayLeaf),
       },
       // Pre 2: withdraw collateral from source protocol → settlement contract
       {
@@ -141,7 +178,7 @@ export function buildSettlementTx(input: SettlementInput): {
         op: LenderOps.WITHDRAW,
         lender: input.sourceWithdrawLeaf.lender,
         data: input.sourceWithdrawLeaf.data,
-        proof: input.sourceWithdrawLeaf.proof,
+        proof: proofFor(input.sourceWithdrawLeaf),
       },
     ],
     [
@@ -153,7 +190,7 @@ export function buildSettlementTx(input: SettlementInput): {
         op: LenderOps.DEPOSIT,
         lender: input.destDepositLeaf.lender,
         data: input.destDepositLeaf.data,
-        proof: input.destDepositLeaf.proof,
+        proof: proofFor(input.destDepositLeaf),
       },
       // Post 2: borrow on dest protocol → settlement contract (repays flash loan)
       {
@@ -163,7 +200,7 @@ export function buildSettlementTx(input: SettlementInput): {
         op: LenderOps.BORROW,
         lender: input.destBorrowLeaf.lender,
         data: input.destBorrowLeaf.data,
-        proof: input.destBorrowLeaf.proof,
+        proof: proofFor(input.destBorrowLeaf),
       },
     ],
     input.feeRecipient,
