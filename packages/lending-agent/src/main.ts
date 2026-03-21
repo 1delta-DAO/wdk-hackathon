@@ -30,8 +30,11 @@ export async function runSettlementFlow(
   chainId: number,
 ): Promise<string> {
   const { oneDeltaClient, wdkClient } = clients
-  const settlement = CONTRACTS_BY_CHAIN[chainId].settlement
+  const chainContracts = CONTRACTS_BY_CHAIN[chainId]
+  const settlement = chainContracts.settlement
+  const morphoPool = chainContracts.morphoPool
   if (!settlement) throw new Error('SETTLEMENT CONTRACT ADDRESS is required')
+  if (!morphoPool) throw new Error('MORPHO POOL ADDRESS is required')
 
   // ── Fetch order ──────────────────────────────────────────
   console.log(`\nFetching order ${orderId}…`)
@@ -157,6 +160,7 @@ export async function runSettlementFlow(
     debtAsset: d.debtAsset,
     user: order.signer,
     settlement,
+    morphoPool,
     debtAmount: BigInt(d.debtAmountBaseUnits),
     feeRecipient: walletAddress as Address || undefined,
   })

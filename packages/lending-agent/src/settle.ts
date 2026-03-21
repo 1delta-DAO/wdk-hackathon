@@ -18,8 +18,7 @@ import type { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import type { MerkleLeaf, StoredOrder } from './order.js'
 import { DRY_RUN, ECONOMIC_MODE, RPC_URL_BY_CHAIN, CONTRACTS_BY_CHAIN } from './config.js'
 
-// Morpho Blue is the flash loan provider — same address on all supported chains
-const MORPHO_BLUE = '0xBBBBBbbBBb9cC5e90e3b3Af64bdAF62C37EEFFCb' as Address
+// Morpho Blue flash loan pool — chain-specific, looked up from CONTRACTS_BY_CHAIN
 
 // WETH on Arbitrum — used to price ETH gas costs via the Aave oracle
 const WETH_ARB = '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1' as Address
@@ -97,6 +96,8 @@ export interface SettlementInput {
   user: Address
   /** Settlement contract address */
   settlement: Address
+  /** Morpho Blue pool address (chain-specific flash loan provider) */
+  morphoPool: Address
   /** Current debt in base units (from get_user_positions) */
   debtAmount: bigint
   /** Optional fee recipient for the solver */
@@ -174,7 +175,7 @@ export function buildSettlementTx(input: SettlementInput): {
     args: [
       input.debtAsset,
       flashAmount,
-      MORPHO_BLUE,
+      input.morphoPool,
       0,                                       // poolId 0 = Morpho Blue
       BigInt(input.order.order.maxFeeBps),
       (input.order.order as any).solver ?? '0x0000000000000000000000000000000000000000',

@@ -1916,5 +1916,109 @@ export const AAVE_TOKENS: Record<string, Record<string, Record<Address, AaveToke
         "vToken": "0xc1d9ca73f57930d4303d380c5dc668c40b38598b"
       }
     }
+  },
+  "PLOUTOS": {
+    "42161": {
+      "0x5979d7b546e38e414f7e9822514be443a4800529": {
+        "aToken": "0x01d65ded4c3c4f76acd5eae730320ebb4af0e156",
+        "vToken": "0xe0641e6f42fe3945deadcb7a413e66beee127839"
+      },
+      "0x82af49447d8a07e3bd95bd0d56f35241523fbab1": {
+        "aToken": "0x3faa464de86ca69863ff0ae029a7a0f0466b8fd9",
+        "vToken": "0x3c35dc6a7e6d05178fce82f6db7094faded76400"
+      },
+      "0xaf88d065e77c8cc2239327c5edb3a432268e5831": {
+        "aToken": "0xa9b9cce44fe4150e87965bb31fb2b55d009812b1",
+        "vToken": "0x22c80225456491ab9ac0e4e3fbecf783d887038f"
+      },
+      "0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9": {
+        "aToken": "0xb75a86deedb9b4c95543d2dd0cc41cb641a28c24",
+        "vToken": "0xe1a82829bc672a5c336e48ec6898496466c80ae3"
+      }
+    }
+  },
+  "AVALON": {
+    "42161": {
+      "0x2f2a2543b76a4166549f7aab2e75bef0aefc5b0f": {
+        "aToken": "0x5d383d2a1dc3e5e82acb2035c10ba1bac989fe42",
+        "vToken": "0x703cc5fca1c0bcb3446e20bf52ab9c5a188c9425"
+      },
+      "0x346c574c56e1a4aaa8dc88cda8f7eb12b39947ab": {
+        "aToken": "0x95118fb8aed1877db25e5f72d319b7ae45e9d101",
+        "vToken": "0x93c138d0295a1b1a715b2751d286732d8f2f4a92"
+      },
+      "0x3647c54c4c2c65bc7a2d63c0da2809b399dbbdc0": {
+        "aToken": "0x3e5e8569b2aa2a8bd235104944868913b23a0d64",
+        "vToken": "0x504ed6c8a0c5b04990da91c0bf9d11f6ee2e6c28"
+      },
+      "0x82af49447d8a07e3bd95bd0d56f35241523fbab1": {
+        "aToken": "0xb57905ab2c72e4354acba8a885294de277c0a7ae",
+        "vToken": "0xa8c3064709a53f8d1c5784b060b29464028c61c4"
+      },
+      "0xaf88d065e77c8cc2239327c5edb3a432268e5831": {
+        "aToken": "0xb05088c49f74092a1fda87257648f92ad0547753",
+        "vToken": "0x15d67fa0a1e579765d0e9211313e4d0f5788256f"
+      },
+      "0xafafd68afe3fe65d376eec9eab1802616cfaccb8": {
+        "aToken": "0x039fad6071212ac685833f2060d29cd9f75d8ad7",
+        "vToken": "0xf14f9f26ac113c1899d4c1eaaf67d4c04a2b5565"
+      },
+      "0xda10009cbd5d07dd0cecc66161fc93d7c9000da1": {
+        "aToken": "0x09586f5eef369909f321f9a313b6d51db1946119",
+        "vToken": "0x2b8360cfc4d18d0c614c8e3bad1990858b9b68c0"
+      },
+      "0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9": {
+        "aToken": "0xabc4b43c27b458745a802e8fa3d00c5e96db0bfc",
+        "vToken": "0x9dca1b6e1f62b324166de1c2ae7b640fad80a237"
+      }
+    }
+  },
+  "AVALON_PUMPBTC": {
+    "42161": {
+      "0x2f2a2543b76a4166549f7aab2e75bef0aefc5b0f": {
+        "aToken": "0x0b37ee41a3b80431a444d7f3d9f0ede9023be000",
+        "vToken": "0xcb4d00eaaf3562469a397994897e7384a124395a"
+      },
+      "0xf469fbd2abcd6b9de8e169d128226c0fc90a012e": {
+        "aToken": "0x9a02588ddff4d079cc5beb1b864b12410049288a",
+        "vToken": "0x02edffa0298313763803089e92e491c915e0e7dd"
+      }
+    }
+  },
+  "YLDR": {
+    "42161": {
+      "0x2f2a2543b76a4166549f7aab2e75bef0aefc5b0f": {
+        "aToken": "0xcb14e172f16db1e8e3cbca41a56281022633414d",
+        "vToken": "0xd5c41944a760c23caa11815c47e43b66719a213d"
+      },
+      "0x5979d7b546e38e414f7e9822514be443a4800529": {
+        "aToken": "0x4107b60471eef310fce240e4dfad14b7e326a6e0",
+        "vToken": "0x16359d6cf2ec7f9020707653d4758ad8969752f0"
+      },
+      "0x82af49447d8a07e3bd95bd0d56f35241523fbab1": {
+        "aToken": "0x6d7197fa1f2b9d01a25705b5558a748a2b5f0605",
+        "vToken": "0xa350429bc896a95f1ef6936e4c4c5da4dd9b0e1"
+      },
+      "0x912ce59144191c1204e64559fe8253a0e49e6548": {
+        "aToken": "0x609772eeeda6dd1537177737823ffb3b3bc9b6e4",
+        "vToken": "0xda27be910ca3e205927cc43088b5681d19de05fa"
+      },
+      "0xaf88d065e77c8cc2239327c5edb3a432268e5831": {
+        "aToken": "0xaa40dca2d69ded3eb17991aa17d83653f1084091",
+        "vToken": "0x7bcc957f8f86aa78762fccc0bfec6dbf8b1ad987"
+      },
+      "0xda10009cbd5d07dd0cecc66161fc93d7c9000da1": {
+        "aToken": "0x43274582edbc3d17ccb8c752da8aa9d471b5a093",
+        "vToken": "0x23a12b967ac30e04e844af3017f5c80b115b476d"
+      },
+      "0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9": {
+        "aToken": "0x172c9dce43198154dc0dacc843fd8103ad09145c",
+        "vToken": "0xcda3934b7dda7fc07ff09e669137c49782812f82"
+      },
+      "0xff970a61a04b1ca14834a43f5de4533ebddb5cc8": {
+        "aToken": "0x8f46fb23d1d7e1385809bc304f979651fd374deb",
+        "vToken": "0x57c2e352e867238a96c300ff6434f7c8d63b3c14"
+      }
+    }
   }
 } as const

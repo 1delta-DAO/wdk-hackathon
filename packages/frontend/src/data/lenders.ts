@@ -192,6 +192,18 @@ export const AAVE_POOLS: Record<string, Record<string, AavePoolConfig>> = {
     "56": { pool: "0xcB0620b181140e57D1C0D8b724cde623cA963c8C", protocolDataProvider: "0x09Ddc4AE826601b0F9671b9edffDf75e7E6f5D61" },
     "5000": { pool: "0x5757b15f60331eF3eDb11b16ab0ae72aE678Ed51", protocolDataProvider: "0x18cc2c55b429EE08748951bBD33FF2a68c95ec38" },
   },
+  "PLOUTOS": {
+    "42161": { pool: "0xDdc98fF53945e334Ecca339b4DD8847b3769e8f0", protocolDataProvider: "0x0F65a7fBCb69074cF8BE8De1E01Ef573da34bD59" },
+  },
+  "AVALON": {
+    "42161": { pool: "0xe1ee45DB12ac98d16F1342a03c93673d74527b55", protocolDataProvider: "0xEc579d2cE07401258710199Ff12a5bb56e086a6F" },
+  },
+  "AVALON_PUMPBTC": {
+    "42161": { pool: "0x4B801fb6f0830D070f40aff9ADFC8f6939Cc1F8D", protocolDataProvider: "0x2c4aEB7C9f0D196a51136B3c7bec49cB2DBD1966" },
+  },
+  "YLDR": {
+    "42161": { pool: "0x54aD657851b6Ae95bA3380704996CAAd4b7751A3", protocolDataProvider: "0x6b69CB817AFa481FF80cb954feAA3be0835b36f9" },
+  },
 }
 
 // ── Morpho Blue addresses ───────────────────────────────────
@@ -224,6 +236,10 @@ function protocolLabel(id: string): string {
     RADIANT_V2: 'Radiant V2',
     GRANARY: 'Granary',
     KINZA: 'Kinza',
+    PLOUTOS: 'Ploutos',
+    AVALON: 'Avalon',
+    AVALON_PUMPBTC: 'Avalon PumpBTC',
+    YLDR: 'YLDR',
   }
   return labels[id] ?? id.replace(/_/g, ' ')
 }
