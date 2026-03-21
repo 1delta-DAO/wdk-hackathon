@@ -12,6 +12,7 @@ wrangler.toml
 
 # Solidity / Foundry / Hardhat
 cache/
+cache_hardhat/
 artifacts/
 out/
 typechain-types/

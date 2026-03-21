@@ -16,6 +16,7 @@ export interface LenderProtocol {
 export type PermissionKind =
   | 'ERC2612_PERMIT'         // aToken approve
   | 'AAVE_DELEGATION'        // vToken credit delegation
+  | 'AAVE_DELEGATION_TX'     // vToken credit delegation (on-chain approveDelegation call)
   | 'COMPOUND_V3_ALLOW'      // Comet manager allow
   | 'MORPHO_AUTHORIZATION'   // Morpho Blue setAuthorization
 
