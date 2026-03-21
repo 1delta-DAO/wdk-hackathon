@@ -57,13 +57,19 @@ export interface SourceInfo {
 export interface DestinationInfo {
   group: LeafGroup
   rates: MarketRates
+  netYield: number | null
+  improvement: number | null
+}
+
+export interface MigrationOption {
+  source: SourceInfo
+  destinations: DestinationInfo[]
 }
 
 export interface SettlementContext {
   chainId: number
   orderSigner: string
-  source: SourceInfo
-  destinations: DestinationInfo[]
+  options: MigrationOption[]
 }
 
 type PositionItem = Record<string, unknown>
@@ -309,67 +315,75 @@ export async function buildSettlementContext(
   console.log(`\n  Fetching positions for ${order.signer}…`)
   const positions = await fetchAllPositions(order.signer, chainId, oneDeltaClient)
 
-  // ── Find source ───────────────────────────────────────────
-  let sourceGroup: LeafGroup | null = null
-  let sourcePosition: PositionItem | null = null
-
+  // ── Collect all viable source candidates ─────────────────
+  const sourceCandidates: { group: LeafGroup; position: PositionItem }[] = []
   for (const g of groups) {
     if (g.repayLeafIndex === undefined || g.withdrawLeafIndex === undefined) continue
     const pos = matchPositionForGroup(g, positions)
     if (pos && getDebtUsd(pos) > 0) {
-      sourceGroup = g
-      sourcePosition = pos
-      break
+      sourceCandidates.push({ group: g, position: pos })
     }
   }
 
-  if (!sourceGroup || !sourcePosition) {
+  if (sourceCandidates.length === 0) {
     console.log('  No source group with active debt found.')
     return null
   }
-
-  console.log(`  Source: ${sourceGroup.protocol} (${sourceGroup.marketKey})`)
-
-  // ── Resolve underlying tokens ─────────────────────────────
-  const tokens = resolveUnderlying(sourceGroup, sourcePosition)
-  if (!tokens) {
-    console.log('  Could not resolve underlying token addresses.')
-    return null
-  }
-
-  const { collateralToken, debtToken } = tokens
-  const debtUsd = getDebtUsd(sourcePosition)
-  const lender  = String(sourcePosition.lender ?? sourceGroup.protocol)
-
-  console.log(`  Collateral: ${collateralToken}  Debt: ${debtToken}  DebtUSD: $${debtUsd.toFixed(4)}`)
 
   // ── Fetch all markets once ────────────────────────────────
   console.log('  Fetching all lending markets…')
   const allMarkets = await fetchAllMarkets(chainId, oneDeltaClient)
   console.log(`  Loaded ${allMarkets.length} market entries`)
 
-  const sourceRates = getMarketRates(allMarkets, sourceGroup, collateralToken, debtToken, chainId)
-  const debtAmountBaseUnits = resolveDebtBaseUnits(debtUsd, debtToken, sourceGroup.protocol, allMarkets)
+  // ── Build options for all source candidates ───────────────
+  const options: MigrationOption[] = []
 
-  // ── Compute destination rates ─────────────────────────────
-  const destinations: DestinationInfo[] = []
-
-  for (const g of groups.filter(g => g !== sourceGroup && g.depositLeafIndex !== undefined && g.borrowLeafIndex !== undefined)) {
-    const rates = getMarketRates(allMarkets, g, collateralToken, debtToken, chainId)
-    if (rates.collateralDepositRate !== null || rates.debtBorrowRate !== null) {
-      destinations.push({ group: g, rates })
-    } else {
-      console.log(`  Skipping destination ${g.protocol} (${g.marketKey}): no market data`)
+  for (const { group: srcGroup, position: srcPos } of sourceCandidates) {
+    const tokens = resolveUnderlying(srcGroup, srcPos)
+    if (!tokens) {
+      console.log(`  Skipping source ${srcGroup.protocol}: could not resolve tokens`)
+      continue
     }
+    const { collateralToken, debtToken } = tokens
+    const debtUsd = getDebtUsd(srcPos)
+    const sourceRates = getMarketRates(allMarkets, srcGroup, collateralToken, debtToken, chainId)
+    const srcNetYield =
+      sourceRates.collateralDepositRate !== null && sourceRates.debtBorrowRate !== null
+        ? sourceRates.collateralDepositRate - sourceRates.debtBorrowRate
+        : null
+    const lender = String(srcPos.lender ?? srcGroup.protocol)
+    const debtAmountBaseUnits = resolveDebtBaseUnits(debtUsd, debtToken, srcGroup.protocol, allMarkets)
+
+    const dests: DestinationInfo[] = []
+    for (const g of groups.filter(g => g !== srcGroup && g.depositLeafIndex !== undefined && g.borrowLeafIndex !== undefined)) {
+      const rates = getMarketRates(allMarkets, g, collateralToken, debtToken, chainId)
+      if (rates.collateralDepositRate !== null || rates.debtBorrowRate !== null) {
+        const netYield =
+          rates.collateralDepositRate !== null && rates.debtBorrowRate !== null
+            ? rates.collateralDepositRate - rates.debtBorrowRate
+            : null
+        const improvement = netYield !== null && srcNetYield !== null ? netYield - srcNetYield : null
+        dests.push({ group: g, rates, netYield, improvement })
+      }
+    }
+
+    console.log(`  Source ${srcGroup.protocol}: net=${srcNetYield?.toFixed(4)} destinations=${dests.length}`)
+    options.push({
+      source: { group: srcGroup, lender, collateralToken, debtToken, debtAmountBaseUnits, rates: sourceRates },
+      destinations: dests,
+    })
   }
 
-  console.log(`  Source rates: deposit=${sourceRates.collateralDepositRate?.toFixed(4)} borrow=${sourceRates.debtBorrowRate?.toFixed(4)}`)
-  console.log(`  ${destinations.length} viable destination(s) found`)
+  if (options.length === 0) {
+    console.log('  No viable migration options found.')
+    return null
+  }
+
+  console.log(`  ${options.length} source option(s) available`)
 
   return {
     chainId,
     orderSigner: order.signer,
-    source: { group: sourceGroup, lender, collateralToken, debtToken, debtAmountBaseUnits, rates: sourceRates },
-    destinations,
+    options,
   }
 }

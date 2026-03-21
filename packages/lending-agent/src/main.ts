@@ -3,7 +3,7 @@ import { callTool, createRouter } from './mcp.js'
 import type { LocalHandler } from './mcp.js'
 import type { GenericTool } from './providers/index.js'
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js'
-import { buildSettlementSystemPrompt } from './prompt.js'
+import { buildSettlementSystemPrompt, buildFlatOptions } from './prompt.js'
 import { runAgentLoop } from './agent.js'
 import { fetchOrder, fetchOpenOrders, markOrderFilled, describeLeaves } from './order.js'
 import type { MerkleLeaf } from './order.js'
@@ -35,6 +35,7 @@ export async function runSettlementFlow(
   const morphoPool = chainContracts.morphoPool
   if (!settlement) throw new Error('SETTLEMENT CONTRACT ADDRESS is required')
   if (!morphoPool) throw new Error('MORPHO POOL ADDRESS is required')
+  // await markOrderFilled(orderId, chainId)
 
   // ── Fetch order ──────────────────────────────────────────
   console.log(`\nFetching order ${orderId}…`)
@@ -64,7 +65,7 @@ export async function runSettlementFlow(
     return 'SKIPPED_NO_CONTEXT'
   }
 
-  if (ctx.destinations.length === 0) {
+  if (ctx.options.every(o => o.destinations.length === 0)) {
     console.log('No destination options available — skipping order.')
     return 'SKIPPED_NO_DESTINATIONS'
   }
@@ -80,6 +81,9 @@ export async function runSettlementFlow(
     console.warn('Could not fetch wallet address:', err instanceof Error ? err.message : err)
   }
 
+  // ── Flat option list (one entry per source→dest pair) ────
+  const flatOptions = buildFlatOptions(ctx)
+
   // ── propose_migration local tool ─────────────────────────
   interface MigrationDecision {
     sourceRepayLeafIndex: number
@@ -94,47 +98,42 @@ export async function runSettlementFlow(
   let migrationDecision: MigrationDecision | null = null
 
   const proposeMigration: LocalHandler = async (input) => {
+    const optIdx = Number(input.optionIndex)
+    const chosen = flatOptions[optIdx]
+    if (!chosen) {
+      return `Invalid optionIndex ${optIdx}. Valid range: 0–${flatOptions.length - 1}.`
+    }
     migrationDecision = {
-      sourceRepayLeafIndex:    Number(input.sourceRepayLeafIndex),
-      sourceWithdrawLeafIndex: Number(input.sourceWithdrawLeafIndex),
-      destDepositLeafIndex:    Number(input.destDepositLeafIndex),
-      destBorrowLeafIndex:     Number(input.destBorrowLeafIndex),
-      collateralAsset:         String(input.collateralAsset) as Address,
-      debtAsset:               String(input.debtAsset) as Address,
-      // Always use pre-computed base units from context — agent may hallucinate this value
-      debtAmountBaseUnits:     ctx.source.debtAmountBaseUnits,
+      sourceRepayLeafIndex:    chosen.source.group.repayLeafIndex!,
+      sourceWithdrawLeafIndex: chosen.source.group.withdrawLeafIndex!,
+      destDepositLeafIndex:    chosen.destination.group.depositLeafIndex!,
+      destBorrowLeafIndex:     chosen.destination.group.borrowLeafIndex!,
+      collateralAsset:         chosen.source.collateralToken,
+      debtAsset:               chosen.source.debtToken,
+      debtAmountBaseUnits:     chosen.source.debtAmountBaseUnits,
       reason:                  String(input.reason),
-    } as MigrationDecision
+    }
     console.log('\n→ Agent proposed migration:', migrationDecision.reason)
     return 'Migration proposal recorded. Proceeding to build and submit settlement transaction.'
   }
 
   const proposeMigrationTool: GenericTool = {
     name: 'propose_migration',
-    description: 'Submit the chosen migration once you have determined the best source→dest option. Call this exactly once.',
+    description: 'Submit the chosen migration option by its index. Call this exactly once.',
     inputSchema: {
       type: 'object',
       properties: {
-        sourceRepayLeafIndex:    { type: 'number',  description: 'Index of the REPAY leaf for the source protocol' },
-        sourceWithdrawLeafIndex: { type: 'number',  description: 'Index of the WITHDRAW leaf for the source protocol' },
-        destDepositLeafIndex:    { type: 'number',  description: 'Index of the DEPOSIT leaf for the destination protocol' },
-        destBorrowLeafIndex:     { type: 'number',  description: 'Index of the BORROW leaf for the destination protocol' },
-        collateralAsset:         { type: 'string',  description: 'Underlying collateral token address' },
-        debtAsset:               { type: 'string',  description: 'Underlying debt token address' },
-        reason:                  { type: 'string',  description: 'Why this is the best option (rates comparison)' },
+        optionIndex: { type: 'number', description: 'The index of the chosen OPTION from the list (0, 1, 2, …)' },
+        reason:      { type: 'string', description: 'One-line explanation naming the protocols and improvement value' },
       },
-      required: [
-        'sourceRepayLeafIndex', 'sourceWithdrawLeafIndex',
-        'destDepositLeafIndex', 'destBorrowLeafIndex',
-        'collateralAsset', 'debtAsset', 'reason',
-      ],
+      required: ['optionIndex', 'reason'],
     },
   }
 
   // ── Run agent ────────────────────────────────────────────
   const allTools: GenericTool[] = [proposeMigrationTool]
 
-  const systemPrompt = buildSettlementSystemPrompt(walletAddress, ctx)
+  const systemPrompt = buildSettlementSystemPrompt(walletAddress, ctx, flatOptions)
   const userMessage = `Analyze the pre-computed settlement context for order ${orderId} on chain ${chainId} and execute the best migration.`
 
   const router = createRouter({}, { propose_migration: proposeMigration })
@@ -150,12 +149,24 @@ export async function runSettlementFlow(
   }
 
   const d = migrationDecision as MigrationDecision
+
+  const srcRepayLeaf   = leaves[d.sourceRepayLeafIndex]   as MerkleLeaf
+  const srcWithdrawLeaf = leaves[d.sourceWithdrawLeafIndex] as MerkleLeaf
+  const dstDepositLeaf  = leaves[d.destDepositLeafIndex]    as MerkleLeaf
+  const dstBorrowLeaf   = leaves[d.destBorrowLeafIndex]     as MerkleLeaf
+
+  console.log('\n=== Leaves selected ===')
+  console.log(`  sourceRepay   [${d.sourceRepayLeafIndex}]: lender=${srcRepayLeaf?.lender}  proofLen=${srcRepayLeaf?.proof?.length ?? 0}  data=${String(srcRepayLeaf?.data).slice(0, 20)}…`)
+  console.log(`  sourceWithdraw[${d.sourceWithdrawLeafIndex}]: lender=${srcWithdrawLeaf?.lender}  proofLen=${srcWithdrawLeaf?.proof?.length ?? 0}  data=${String(srcWithdrawLeaf?.data).slice(0, 20)}…`)
+  console.log(`  destDeposit   [${d.destDepositLeafIndex}]: lender=${dstDepositLeaf?.lender}  proofLen=${dstDepositLeaf?.proof?.length ?? 0}  data=${String(dstDepositLeaf?.data).slice(0, 20)}…`)
+  console.log(`  destBorrow    [${d.destBorrowLeafIndex}]: lender=${dstBorrowLeaf?.lender}  proofLen=${dstBorrowLeaf?.proof?.length ?? 0}  data=${String(dstBorrowLeaf?.data).slice(0, 20)}…`)
+
   const txHash = await executeSettlement(wdkClient, {
     order,
-    sourceRepayLeaf: leaves[d.sourceRepayLeafIndex] as MerkleLeaf,
-    sourceWithdrawLeaf: leaves[d.sourceWithdrawLeafIndex] as MerkleLeaf,
-    destDepositLeaf: leaves[d.destDepositLeafIndex] as MerkleLeaf,
-    destBorrowLeaf: leaves[d.destBorrowLeafIndex] as MerkleLeaf,
+    sourceRepayLeaf:   srcRepayLeaf,
+    sourceWithdrawLeaf: srcWithdrawLeaf,
+    destDepositLeaf:   dstDepositLeaf,
+    destBorrowLeaf:    dstBorrowLeaf,
     collateralAsset: d.collateralAsset,
     debtAsset: d.debtAsset,
     user: order.signer,
