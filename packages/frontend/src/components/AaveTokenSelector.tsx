@@ -1,7 +1,37 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { useReadContracts } from 'wagmi'
-import { erc20Abi } from 'viem'
+import { erc20Abi, getAddress } from 'viem'
 import type { AaveTokenPermission } from '../data/lenders'
+
+/** Token icon from Trustwallet assets CDN, with fallback to a colored circle with initial */
+function TokenIcon({ address, symbol, size = 18 }: { address: string; symbol?: string; size?: number }) {
+  const [errored, setErrored] = useState(false)
+  const checksummed = (() => { try { return getAddress(address) } catch { return address } })()
+  const src = `https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/arbitrum/assets/${checksummed}/logo.png`
+
+  if (errored || !address) {
+    const letter = symbol ? symbol[0].toUpperCase() : '?'
+    return (
+      <span
+        className="inline-flex items-center justify-center rounded-full bg-base-content/10 text-base-content/50 shrink-0"
+        style={{ width: size, height: size, fontSize: size * 0.55, fontWeight: 700 }}
+      >
+        {letter}
+      </span>
+    )
+  }
+
+  return (
+    <img
+      src={src}
+      alt={symbol ?? ''}
+      width={size}
+      height={size}
+      className="rounded-full shrink-0"
+      onError={() => setErrored(true)}
+    />
+  )
+}
 
 interface Props {
   protocolLabel: string
@@ -75,9 +105,12 @@ export function AaveTokenSelector({ protocolLabel, permissions, selectedKeys, on
 
           return (
             <div key={underlying} className="px-2 py-1">
-              <div className="text-[10px] font-medium text-base-content/50 mb-0.5">
-                {symbol ?? shortAddr}
-                {symbol && <span className="text-base-content/20 ml-1">{shortAddr}</span>}
+              <div className="flex items-center gap-1.5 text-[10px] font-medium text-base-content/50 mb-0.5">
+                <TokenIcon address={underlying} symbol={symbol} size={16} />
+                <span>
+                  {symbol ?? shortAddr}
+                  {symbol && <span className="text-base-content/20 ml-1">{shortAddr}</span>}
+                </span>
               </div>
               <div className="flex gap-1">
                 {perms.map((perm) => {
