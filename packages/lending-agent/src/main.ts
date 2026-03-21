@@ -178,7 +178,7 @@ export async function runSettlementFlow(
 
   // Mark filled after successful on-chain submission
   if (txHash !== 'DRY_RUN' && txHash !== 'SKIPPED_NOT_ECONOMIC') {
-    await markOrderFilled(orderId, chainId)
+    // await markOrderFilled(orderId, chainId)
     console.log(`  Order ${orderId} marked as filled.`)
   }
 

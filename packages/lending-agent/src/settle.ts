@@ -38,6 +38,10 @@ const MULTICALL_ABI = parseAbi([
   'function multicall(bytes[] calldata data) external',
 ])
 
+const APPROVE_TOKEN_ABI = parseAbi([
+  'function approveToken(address token, address spender, uint256 amount) external',
+])
+
 const PERMIT_ABI = parseAbi([
   'function permit(address token, address owner, address spender, uint256 value, uint256 deadline, uint8 v, bytes32 r, bytes32 s) external',
 ])
@@ -132,57 +136,6 @@ function encodePermitCall(
   }
 }
 
-/**
- * Derives the required ERC20 approvals from the merkle leaves.
- * The settlement contract needs to approve lending pools to spend tokens
- * it holds (e.g. approve Aave pool to spend USDC for repay, approve
- * Aave pool to spend WETH for deposit).
- */
-function deriveApprovalCalls(leaves: MerkleLeaf[]): Hex[] {
-  const calls: Hex[] = []
-  const seen = new Set<string>()
-
-  for (const leaf of leaves) {
-    // Aave leaves: data contains pool address
-    // Op 0 (deposit) / 2 (repay): settlement sends asset TO pool → needs approval
-    if (leaf.op === 0 || leaf.op === 2) {
-      // Extract pool address from leaf data based on lender type
-      let pool: Address | undefined
-      const data = leaf.data as Hex
-
-      if (leaf.lender < 2000) {
-        // Aave: deposit data = [20: pool], repay data = [1: mode][20: debtToken][20: pool]
-        if (leaf.op === 0) {
-          // deposit: data is [20: pool]
-          pool = ('0x' + data.slice(2, 42)) as Address
-        } else {
-          // repay: data is [1: mode][20: debtToken][20: pool]
-          pool = ('0x' + data.slice(42, 82)) as Address
-        }
-      }
-      // Other protocols extract similarly but for now Aave is the primary case
-
-      if (pool) {
-        // We don't know the exact asset here, but approveToken is permissionless
-        // and the settlement contract calls it. The actual asset comes from executionData.
-        // We'll use a wildcard approach: approve the pool for common tokens.
-        // However, for correctness we skip asset-specific approvals here and rely
-        // on the settlement contract already having infinite approvals set up during deploy.
-        // If not, the solver can add approveToken calls manually.
-        const key = `${pool}`
-        if (!seen.has(key)) {
-          seen.add(key)
-          // Note: we don't add approval calls here because the settlement contract
-          // should already have approvals set during deployment. If needed, the
-          // agent can add them via approveToken in the multicall.
-        }
-      }
-    }
-  }
-
-  return calls
-}
-
 export interface EconomicCheckResult {
   viable: boolean
   reason: string
@@ -267,11 +220,21 @@ export function buildSettlementTx(input: SettlementInput): {
   flashAmount: bigint
   borrowAmount: bigint
 } {
-  // Add 0.01% buffer to cover interest accrued between calculation and execution
-  const flashAmount = input.debtAmount + input.debtAmount / 10_000n + 1n
+  // Compute Merkle proofs from the full leaf set (API does not return proofs)
+  const leafHashes = input.order.order.leaves.map(l => l.leaf as Hex)
+  const { proofs } = buildMerkleTree(leafHashes)
+  const proofFor = (leaf: MerkleLeaf): Hex[] => {
+    const idx = input.order.order.leaves.indexOf(leaf)
+    return idx >= 0 ? (proofs[idx] ?? []) : []
+  }
 
-  // Borrow slightly more on dest: flash loan repayment + solver fee headroom
-  const borrowAmount = flashAmount + (flashAmount * BigInt(input.order.order.maxFeeBps)) / 10_000_000n
+  // Only add buffer when maxFeeBps > 0; when zero fee is allowed, any surplus reverts
+  const buffer = input.order.order.maxFeeBps > 0 ? input.debtAmount / 10_000n + 1n : 0n
+  const flashAmount = input.debtAmount + buffer
+
+  // Solver fee is taken from the borrowed amount, not the flash loan
+  const fee = (input.debtAmount * BigInt(input.order.order.maxFeeBps)) / 10_000_000n
+  const borrowAmount = input.debtAmount + fee
 
   const executionData = encodeExecutionData(
     [
@@ -283,7 +246,7 @@ export function buildSettlementTx(input: SettlementInput): {
         op: LenderOps.REPAY,
         lender: input.sourceRepayLeaf.lender,
         data: input.sourceRepayLeaf.data,
-        proof: input.sourceRepayLeaf.proof,
+        proof: proofFor(input.sourceRepayLeaf),
       },
       // Pre 2: withdraw collateral from source protocol → settlement contract
       {
@@ -293,7 +256,7 @@ export function buildSettlementTx(input: SettlementInput): {
         op: LenderOps.WITHDRAW,
         lender: input.sourceWithdrawLeaf.lender,
         data: input.sourceWithdrawLeaf.data,
-        proof: input.sourceWithdrawLeaf.proof,
+        proof: proofFor(input.sourceWithdrawLeaf),
       },
     ],
     [
@@ -305,7 +268,7 @@ export function buildSettlementTx(input: SettlementInput): {
         op: LenderOps.DEPOSIT,
         lender: input.destDepositLeaf.lender,
         data: input.destDepositLeaf.data,
-        proof: input.destDepositLeaf.proof,
+        proof: proofFor(input.destDepositLeaf),
       },
       // Post 2: borrow on dest protocol → settlement contract (repays flash loan)
       {
@@ -315,7 +278,7 @@ export function buildSettlementTx(input: SettlementInput): {
         op: LenderOps.BORROW,
         lender: input.destBorrowLeaf.lender,
         data: input.destBorrowLeaf.data,
-        proof: input.destBorrowLeaf.proof,
+        proof: proofFor(input.destBorrowLeaf),
       },
     ],
     input.feeRecipient,
@@ -344,9 +307,30 @@ export function buildSettlementTx(input: SettlementInput): {
   const permitCalls = permits.map(p =>
     encodePermitCall(p, input.user, input.settlement),
   )
-  const approvalCalls = deriveApprovalCalls(input.order.order.leaves)
 
-  const allCalls = [...permitCalls, ...approvalCalls, settlementCall]
+  // Extract spenders from leaf data:
+  //   Compound V3 repay/deposit: data = [20: comet]
+  //   Aave repay: data = [1: mode][20: debtToken][20: pool] → pool at offset 21
+  //   Aave deposit: data = [20: pool]
+  const spenderFromLeaf = (leaf: MerkleLeaf): Address => {
+    const isAave = leaf.lender < 2000
+    const isRepay = leaf.op === 2
+    const offset = isAave && isRepay ? 21 : 0
+    return `0x${leaf.data.slice(2 + offset * 2, 2 + (offset + 20) * 2)}` as Address
+  }
+
+  const repaySpender   = spenderFromLeaf(input.sourceRepayLeaf)
+  const depositSpender = spenderFromLeaf(input.destDepositLeaf)
+  const approve = (token: Address, spender: Address, amount: bigint) =>
+    encodeFunctionData({ abi: APPROVE_TOKEN_ABI, functionName: 'approveToken', args: [token, spender, amount] })
+
+  const tokenApprovals: Hex[] = [
+    approve(input.debtAsset,       repaySpender,      maxUint256),
+    approve(input.collateralAsset, depositSpender,    maxUint256),
+    approve(input.debtAsset,       input.morphoPool,  flashAmount),
+  ]
+
+  const allCalls = [...permitCalls, ...tokenApprovals, settlementCall]
 
   // If there are extra calls to bundle, wrap in multicall; otherwise send bare
   let data: Hex
