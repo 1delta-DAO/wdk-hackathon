@@ -1,0 +1,58 @@
+
+Registered chains: [ 'ethereum', 'arbitrum', 'bitcoin' ]
+Registered swap protocols: [ 'ethereum', 'arbitrum' ]
+Registered bridge protocols: [ 'ethereum', 'arbitrum' ]
+Registered lending protocols: [ 'ethereum' ]
+Indexer: disabled (set WDK_INDEXER_API_KEY to enable)
+Fiat: disabled (set MOONPAY_API_KEY and MOONPAY_SECRET_KEY to enable)
+
+Fetching open orders for chain 42161…
+  Found 1 open order(s).
+
+─── Processing order 866979dd-aff4-40c2-aa01-985ab641de50 ───
+
+Fetching order 866979dd-aff4-40c2-aa01-985ab641de50…
+  signer: 0x334d52E24d452fa20489f07Bd943b7cF943Cb881  leaves: 10  status: open
+
+Leaves:
+  [0] DEPOSIT AAVE_V3 pool=0x794a6135…
+  [1] BORROW AAVE_V3 pool=0x794a6135…
+  [2] REPAY AAVE_V3 pool=0x794a6135…
+  [3] WITHDRAW AAVE_V3 pool=0x794a6135…
+  [4] REPAY AAVE_V3 pool=0x794a6135…
+  [5] WITHDRAW AAVE_V3 pool=0x794a6135…
+  [6] REPAY COMPOUND_V3 comet=0xd98Be00b…
+  [7] WITHDRAW COMPOUND_V3 comet=0xd98Be00b…
+  [8] DEPOSIT COMPOUND_V3 comet=0xd98Be00b…
+  [9] BORROW COMPOUND_V3 comet=0xd98Be00b…
+
+Building settlement context…
+
+  Fetching positions for 0x334d52E24d452fa20489f07Bd943b7cF943Cb881…
+  Source: AAVE_V3 (AAVE_V3:0x794a61358D6845594F94dc1DB02A252b5b4814aD)
+  Collateral: 0x82af49447d8a07e3bd95bd0d56f35241523fbab1  Debt: 0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9  DebtUSD: $0.2999
+  Fetching all lending markets…
+  Loaded 145 market entries
+  Source rates: deposit=1.6756 borrow=2.7519
+  1 viable destination(s) found
+
+→ propose_migration
+  input: {"sourceRepayLeafIndex":4,"sourceWithdrawLeafIndex":5,"destDepositLeafIndex":8,"destBorrowLeafIndex":9,"collateralAsset":"0x82af49447d8a07e3bd95bd0d56f35241523fbab1","debtAsset":"0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9","reason":"Improved net yield from -1.0764 to -3.1935."}
+
+→ Agent proposed migration: Improved net yield from -1.0764 to -3.1935.
+  result: Migration proposal recorded. Proceeding to build and submit settlement transaction.
+
+=== Agent Result ===
+The migration proposal has been successfully recorded and the settlement transaction is being built and submitted.
+
+=== Settlement Tx ===
+  chainId:       42161
+  to:            0x2FA48F02923a0C93326A68aA26E3a0b836d5685F
+  flashAmount:   300037
+  borrowAmount:  300037
+  debtAsset:     0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9
+  collateral:    0x82af49447d8a07e3bd95bd0d56f35241523fbab1
+  source lender: 0
+  dest lender:   2000
+  tx hash: 0x5171ab54511a82cde6f7deed369e0a168abcaf45b751d1aeca29481c43453922
+  Order 866979dd-aff4-40c2-aa01-985ab641de50 marked as filled.

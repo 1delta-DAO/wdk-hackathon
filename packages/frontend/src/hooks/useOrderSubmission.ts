@@ -1,15 +1,8 @@
 import { useCallback, useState } from 'react'
 import { useAccount, useWalletClient } from 'wagmi'
-import { encodeAbiParameters, maxUint256 } from 'viem'
 import type { Hex } from 'viem'
 import { SETTLEMENT_ADDRESSES, ORDER_BACKEND_URL } from '../config/settlements'
 import type { GeneratedLeaf } from '../lib/merkle'
-import {
-  encodePermitCall,
-  encodeAaveDelegationCall,
-  encodeCompoundV3AuthCall,
-  encodeMorphoAuthCall,
-} from '@1delta/settlement-sdk'
 import type { SignedPermission } from './usePermitSignatures'
 
 // EIP-712 typed data for settlement orders
@@ -32,12 +25,10 @@ interface SubmitOrderParams {
   permits?: SignedPermission[]
   /** Deadline in seconds from now (default: 1 hour) */
   deadlineSeconds?: number
-  /** Max fee in sub-basis-points (default: 5000 = 0.05%). Denominator is 1e7 so 1 bps = 1000. */
+  /** Max fee in sub-basis-points (default: 0) */
   maxFeeBps?: number
   /** Restrict to specific solver address (default: address(0) = permissionless) */
   solver?: `0x${string}`
-  /** Signed authorization permits to embed in fillerCalldata (Aave, Compound, Morpho) */
-  signedPermissions?: SignedPermission[]
 }
 
 interface SubmittedOrder {
@@ -66,7 +57,7 @@ export function useOrderSubmission(chainId: number | null) {
 
     try {
       const deadline = Math.floor(Date.now() / 1000) + (params.deadlineSeconds ?? 3600)
-      const maxFeeBps = params.maxFeeBps ?? 5000
+      const maxFeeBps = params.maxFeeBps ?? 0
       const solver = params.solver ?? '0x0000000000000000000000000000000000000000'
 
       // Sign the EIP-712 order
@@ -87,55 +78,6 @@ export function useOrderSubmission(chainId: number | null) {
           settlementData: params.settlementData,
         },
       })
-
-      // Encode signed permissions as fillerCalldata (ABI-encoded bytes[])
-      let fillerCalldata: Hex = '0x'
-      if (params.signedPermissions && params.signedPermissions.length > 0) {
-        const calls: Hex[] = params.signedPermissions.map(sp => {
-          const { request, signature, deadline, nonce } = sp
-          switch (request.kind) {
-            case 'ERC2612_PERMIT':
-              return encodePermitCall({
-                token: request.targetAddress,
-                owner: address,
-                spender: settlementAddress,
-                value: maxUint256,
-                deadline,
-                sig: signature,
-              })
-            case 'AAVE_DELEGATION':
-              return encodeAaveDelegationCall({
-                debtToken: request.targetAddress,
-                delegator: address,
-                delegatee: settlementAddress,
-                value: maxUint256,
-                deadline,
-                sig: signature,
-              })
-            case 'COMPOUND_V3_ALLOW':
-              return encodeCompoundV3AuthCall({
-                comet: request.targetAddress,
-                owner: address,
-                manager: settlementAddress,
-                isAllowed: true,
-                nonce,
-                expiry: deadline,
-                sig: signature,
-              })
-            case 'MORPHO_AUTHORIZATION':
-              return encodeMorphoAuthCall({
-                morpho: request.targetAddress,
-                authorizer: address,
-                authorized: settlementAddress,
-                isAuthorized: true,
-                nonce,
-                deadline,
-                sig: signature,
-              })
-          }
-        })
-        fillerCalldata = encodeAbiParameters([{ type: 'bytes[]' }], [calls])
-      }
 
       // Build the backend payload with merkle leaves for fillers
       const backendLeaves = params.leaves.map(l => ({
@@ -164,7 +106,7 @@ export function useOrderSubmission(chainId: number | null) {
           settlementData: params.settlementData,
           orderData: params.orderData,
           executionData: '0x' as Hex,
-          fillerCalldata,
+          fillerCalldata: '0x' as Hex,
           chainId,
           maxFeeBps,
           solver,
