@@ -213,7 +213,7 @@ abstract contract SettlementBase is
         address oracle;
         uint256 swapTolerance;
 
-        assembly {
+        assembly ("memory-safe") {
             let sd := add(add(settlementData, 0x20), sdOffset)
             sdAssetIn := shr(96, mload(sd))
             sdAssetOut := shr(96, mload(add(sd, 20)))
@@ -227,7 +227,7 @@ abstract contract SettlementBase is
         address target;
         uint256 swapCalldataLen;
 
-        assembly {
+        assembly ("memory-safe") {
             let fc := add(add(fillerCalldata, 0x20), fcOffset)
             fcAssetIn := shr(96, mload(fc))
             fcAssetOut := shr(96, mload(add(fc, 20)))
@@ -239,7 +239,7 @@ abstract contract SettlementBase is
         if (fcAssetIn != sdAssetIn || fcAssetOut != sdAssetOut) revert ConversionMismatch();
 
         if (amountIn == 0) {
-            assembly {
+            assembly ("memory-safe") {
                 let ptr := mload(0x40)
                 mstore(ptr, 0x70a0823100000000000000000000000000000000000000000000000000000000)
                 mstore(add(ptr, 4), address())
@@ -250,19 +250,16 @@ abstract contract SettlementBase is
                 amountIn := mload(ptr)
             }
             if (amountIn == 0) {
-                newDeltaCount = deltaCount;
-                fcConsumed = 76 + swapCalldataLen;
-                return (newDeltaCount, fcConsumed);
+                return (deltaCount, 76 + swapCalldataLen);
             }
         }
 
+        fcConsumed = 76 + swapCalldataLen;
         uint256 amountOut = _forwardSwap(fcAssetIn, fcAssetOut, amountIn, target, fillerCalldata, fcOffset, swapCalldataLen);
         _verifySwapOutput(oracle, fcAssetIn, fcAssetOut, amountIn, amountOut, swapTolerance);
 
         newDeltaCount = _updateDelta(deltas, deltaCount, fcAssetIn, -int256(amountIn), 0);
         newDeltaCount = _updateDelta(deltas, newDeltaCount, fcAssetOut, int256(amountOut), 0);
-
-        fcConsumed = 76 + swapCalldataLen;
     }
 
     function _forwardSwap(

@@ -144,6 +144,35 @@ contract HealthFactorForkTest is Test {
     uint256 constant MORPHO_CBBTC_COLLATERAL = 1e7; // 0.1 cbBTC (8 decimals)
     uint256 constant MORPHO_USDC_BORROW = 1000e6;   // 1000 USDC
 
+    // ── Settlement call wrappers (avoid 11-arg stack-too-deep) ──
+
+    address private _fa; uint256 private _fb; address private _fc;
+    uint48 private _fd;
+    bytes private _fe; bytes private _ff; bytes private _fg; bytes private _fh;
+
+    function _settleFlash(
+        address asset, uint256 amount, address pool,
+        uint48 deadline, bytes memory sig,
+        bytes memory od, bytes memory ed, bytes memory fc
+    ) internal {
+        _fa = asset; _fb = amount; _fc = pool; _fd = deadline;
+        _fe = sig; _ff = od; _fg = ed; _fh = fc;
+        _doSettle();
+    }
+    function _doSettle() private {
+        settlement.settleWithFlashLoan(_fa, _fb, _fc, 0, 0, address(0), _fd, _fe, _ff, _fg, _fh);
+    }
+    function _settlePlain(
+        uint48 deadline, bytes memory sig,
+        bytes memory od, bytes memory ed, bytes memory fc
+    ) internal {
+        _fd = deadline; _fe = sig; _ff = od; _fg = ed; _fh = fc;
+        _doSettlePlain();
+    }
+    function _doSettlePlain() private {
+        settlement.settle(0, address(0), _fd, _fe, _ff, _fg, _fh);
+    }
+
     // ── Helpers ──────────────────────────────────────────────
 
     function _leaf(uint8 op, uint16 lender, bytes memory data) internal pure returns (bytes32) {
@@ -296,12 +325,13 @@ contract HealthFactorForkTest is Test {
 
         bytes memory swapCalldata = abi.encodeCall(FixedRateSwapper.swap, (WETH, swapAll, WBTC));
         p.fillerCalldata = abi.encodePacked(
-            WETH, WBTC, uint112(swapAll), address(swapper), uint16(swapCalldata.length), swapCalldata
+            WETH, WBTC, uint112(swapAll), uint8(1), uint8(2), address(swapper), uint16(swapCalldata.length), swapCalldata
         );
 
         p.executionData = abi.encodePacked(
             uint8(2),
             uint8(2),
+            uint8(3),       // numAssets: USDC, WETH, WBTC
             address(0),
             _action(USDC, type(uint112).max, user, 2, 0, repayData, pr0),
             _action(WETH, type(uint112).max, address(settlement), 3, 0, withdrawData, pr1),
@@ -341,19 +371,7 @@ contract HealthFactorForkTest is Test {
         uint48 deadline = uint48(block.timestamp + 1 hours);
         bytes memory sig = _signOrder(userPk, p.merkleRoot, deadline, 0, address(0), p.settlementPayload);
 
-        settlement.settleWithFlashLoan(
-            USDC,
-            flashAmount,
-            MORPHO_BLUE,
-            0,
-            0,
-            address(0),
-            deadline,
-            sig,
-            p.orderData,
-            p.executionData,
-            p.fillerCalldata
-        );
+        _settleFlash(USDC, flashAmount, MORPHO_BLUE, deadline, sig, p.orderData, p.executionData, p.fillerCalldata);
 
         (,,,,,uint256 hfAfter) = IPool(AAVE_V3_CORE).getUserAccountData(user);
 
@@ -393,19 +411,7 @@ contract HealthFactorForkTest is Test {
         bytes memory sig = _signOrder(userPk, p.merkleRoot, deadline, 0, address(0), p.settlementPayload);
 
         vm.expectRevert(HealthFactorChecker.HealthFactorTooLow.selector);
-        settlement.settleWithFlashLoan(
-            USDC,
-            flashAmount,
-            MORPHO_BLUE,
-            0,
-            0,
-            address(0),
-            deadline,
-            sig,
-            p.orderData,
-            p.executionData,
-            p.fillerCalldata
-        );
+        _settleFlash(USDC, flashAmount, MORPHO_BLUE, deadline, sig, p.orderData, p.executionData, p.fillerCalldata);
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -464,12 +470,13 @@ contract HealthFactorForkTest is Test {
 
         bytes memory swapCalldata = abi.encodeCall(FixedRateSwapper.swap, (WETH, swapAll, WBTC));
         bytes memory fillerCalldata = abi.encodePacked(
-            WETH, WBTC, uint112(swapAll), address(swapper), uint16(swapCalldata.length), swapCalldata
+            WETH, WBTC, uint112(swapAll), uint8(1), uint8(2), address(swapper), uint16(swapCalldata.length), swapCalldata
         );
 
         bytes memory executionData = abi.encodePacked(
             uint8(2),
             uint8(2),
+            uint8(3),       // numAssets: USDC, WETH, WBTC
             address(0),
             _action(USDC, type(uint112).max, user, 2, 0, repayData, pr0),
             _action(WETH, type(uint112).max, address(settlement), 3, 0, withdrawData, pr1),
@@ -480,9 +487,7 @@ contract HealthFactorForkTest is Test {
         uint48 deadline = uint48(block.timestamp + 1 hours);
         bytes memory sig = _signOrder(userPk, root, deadline, 0, address(0), settlementPayload);
 
-        settlement.settleWithFlashLoan(
-            USDC, userDebt, MORPHO_BLUE, 0, 0, address(0), deadline, sig, orderData, executionData, fillerCalldata
-        );
+        _settleFlash(USDC, userDebt, MORPHO_BLUE, deadline, sig, orderData, executionData, fillerCalldata);
 
         assertEq(IERC20(aWETH).balanceOf(user), 0, "all WETH withdrawn");
         assertGt(IERC20(aWBTC).balanceOf(user), 0, "user has WBTC collateral");
@@ -524,6 +529,7 @@ contract HealthFactorForkTest is Test {
         bytes memory executionData = abi.encodePacked(
             uint8(1),
             uint8(1),
+            uint8(1),       // numAssets: WETH
             address(0),
             _action(WETH, type(uint112).max, address(settlement), 3, 0, withdrawData, pr0),
             _action(WETH, 0, user, 0, 0, depositData, pr1)
@@ -533,7 +539,7 @@ contract HealthFactorForkTest is Test {
         bytes memory sig = _signOrder(userPk, root, deadline, 0, address(0), settlementPayload);
 
         // Empty fillerCalldata — no swap
-        settlement.settle(0, address(0), deadline, sig, orderData, executionData, "");
+        _settlePlain(deadline, sig, orderData, executionData, "");
 
         (,,,,,uint256 hfAfter) = IPool(AAVE_V3_CORE).getUserAccountData(user);
         assertEq(hfAfter, type(uint256).max, "health factor is max with no debt");
@@ -585,6 +591,7 @@ contract HealthFactorForkTest is Test {
         p.executionData = abi.encodePacked(
             uint8(1),
             uint8(1),
+            uint8(1),       // numAssets: WETH
             address(0),
             _action(WETH, type(uint112).max, address(settlement), 3, 0, withdrawData, pr0),
             _action(WETH, 0, user, 0, 0, depositData, pr1)
@@ -601,7 +608,7 @@ contract HealthFactorForkTest is Test {
         SettlementParams memory p = _buildCompoundV3ConditionSettlement(uint112(1.1e18));
         uint48 deadline = uint48(block.timestamp + 1 hours);
         bytes memory sig = _signOrder(userPk, p.merkleRoot, deadline, 0, address(0), p.settlementPayload);
-        settlement.settle(0, address(0), deadline, sig, p.orderData, p.executionData, p.fillerCalldata);
+        _settlePlain(deadline, sig, p.orderData, p.executionData, p.fillerCalldata);
 
         assertGt(IComet(USDC_COMET).borrowBalanceOf(user), 0, "user has Compound V3 debt");
         console.log("Compound V3 HF pass test succeeded");
@@ -620,7 +627,7 @@ contract HealthFactorForkTest is Test {
         bytes memory sig = _signOrder(userPk, p.merkleRoot, deadline, 0, address(0), p.settlementPayload);
 
         // Does NOT revert — Compound V3 condition skipped because no CompV3 borrow/withdraw
-        settlement.settle(0, address(0), deadline, sig, p.orderData, p.executionData, p.fillerCalldata);
+        _settlePlain(deadline, sig, p.orderData, p.executionData, p.fillerCalldata);
         console.log("Compound V3 HF check correctly skipped: no risky CompV3 ops");
     }
 
@@ -632,7 +639,7 @@ contract HealthFactorForkTest is Test {
         SettlementParams memory p = _buildCompoundV3ConditionSettlement(uint112(100e18));
         uint48 deadline = uint48(block.timestamp + 1 hours);
         bytes memory sig = _signOrder(userPk, p.merkleRoot, deadline, 0, address(0), p.settlementPayload);
-        settlement.settle(0, address(0), deadline, sig, p.orderData, p.executionData, p.fillerCalldata);
+        _settlePlain(deadline, sig, p.orderData, p.executionData, p.fillerCalldata);
 
         console.log("Compound V3 no-debt test passed: borrowBalanceOf == 0 skips HF check");
     }
@@ -710,6 +717,7 @@ contract HealthFactorForkTest is Test {
         p.executionData = abi.encodePacked(
             uint8(1),
             uint8(1),
+            uint8(1),       // numAssets: WETH
             address(0),
             _action(WETH, type(uint112).max, address(settlement), 3, 0, withdrawData, pr0),
             _action(WETH, 0, user, 0, 0, depositData, pr1)
@@ -730,7 +738,7 @@ contract HealthFactorForkTest is Test {
         SettlementParams memory p = _buildMorphoConditionSettlement(uint112(1.1e18));
         uint48 deadline = uint48(block.timestamp + 1 hours);
         bytes memory sig = _signOrder(userPk, p.merkleRoot, deadline, 0, address(0), p.settlementPayload);
-        settlement.settle(0, address(0), deadline, sig, p.orderData, p.executionData, p.fillerCalldata);
+        _settlePlain(deadline, sig, p.orderData, p.executionData, p.fillerCalldata);
 
         _assertMorphoPositionHealthy(1.1e18);
     }
@@ -763,7 +771,7 @@ contract HealthFactorForkTest is Test {
         bytes memory sig = _signOrder(userPk, p.merkleRoot, deadline, 0, address(0), p.settlementPayload);
 
         // Does NOT revert — Morpho condition skipped because no Morpho borrow/withdraw
-        settlement.settle(0, address(0), deadline, sig, p.orderData, p.executionData, p.fillerCalldata);
+        _settlePlain(deadline, sig, p.orderData, p.executionData, p.fillerCalldata);
         console.log("Morpho HF check correctly skipped: no risky Morpho ops");
     }
 
@@ -781,7 +789,7 @@ contract HealthFactorForkTest is Test {
         uint48 deadline = uint48(block.timestamp + 1 hours);
         bytes memory sig = _signOrder(userPk, p.merkleRoot, deadline, 0, address(0), p.settlementPayload);
 
-        settlement.settle(0, address(0), deadline, sig, p.orderData, p.executionData, p.fillerCalldata);
+        _settlePlain(deadline, sig, p.orderData, p.executionData, p.fillerCalldata);
 
         console.log("Morpho no-debt test passed: borrowShares == 0 skips HF check");
     }
@@ -829,6 +837,7 @@ contract HealthFactorForkTest is Test {
         bytes memory executionData = abi.encodePacked(
             uint8(1),
             uint8(1),
+            uint8(1),       // numAssets: WETH
             address(0),
             _action(WETH, type(uint112).max, address(settlement), 3, 0, withdrawData, pr0),
             _action(WETH, 0, user, 0, 0, depositData, pr1)
@@ -837,7 +846,7 @@ contract HealthFactorForkTest is Test {
         uint48 deadline = uint48(block.timestamp + 1 hours);
         bytes memory sig = _signOrder(userPk, root, deadline, 0, address(0), settlementPayload);
 
-        settlement.settle(0, address(0), deadline, sig, orderData, executionData, "");
+        _settlePlain(deadline, sig, orderData, executionData, "");
 
         console.log("Mixed conditions test passed: both Aave + Morpho HF checks succeeded");
     }
@@ -890,6 +899,7 @@ contract HealthFactorForkTest is Test {
         bytes memory executionData = abi.encodePacked(
             uint8(1),
             uint8(1),
+            uint8(1),       // numAssets: WETH
             address(0),
             _action(WETH, type(uint112).max, address(settlement), 3, 0, withdrawData, pr0),
             _action(WETH, 0, user, 0, 0, depositData, pr1)
@@ -898,7 +908,7 @@ contract HealthFactorForkTest is Test {
         uint48 deadline = uint48(block.timestamp + 1 hours);
         bytes memory sig = _signOrder(userPk, root, deadline, 0, address(0), settlementPayload);
 
-        settlement.settle(0, address(0), deadline, sig, orderData, executionData, "");
+        _settlePlain(deadline, sig, orderData, executionData, "");
 
         console.log("Mixed conditions test passed: Aave + Compound V3 + Morpho HF checks succeeded");
     }

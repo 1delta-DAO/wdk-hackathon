@@ -346,20 +346,7 @@ abstract contract SettlementExecutor is UniversalSettlementLending {
             }
 
             // Allocate delta array sized by solver-provided numAssets (byte 2).
-            assembly {
-                let n := shr(248, mload(add(add(executionData, 0x20), 2)))
-                // Manually allocate: length + n * 3 words (asset, delta, totalBorrowed)
-                let fmp := mload(0x40)
-                deltas := fmp
-                mstore(fmp, n)
-                let sz := mul(n, 0x60)
-                // zero-init the array data
-                let start := add(fmp, 0x20)
-                for { let i := 0 } lt(i, sz) { i := add(i, 0x20) } {
-                    mstore(add(start, i), 0)
-                }
-                mstore(0x40, add(start, sz))
-            }
+            deltas = _allocateDeltas(executionData);
 
             // ── Stage 1: pre-actions ──
             (execOffset, deltaCount, riskyLenderMask) = _executeActions(
@@ -394,6 +381,15 @@ abstract contract SettlementExecutor is UniversalSettlementLending {
         if (riskyLenderMask != 0) {
             _postSettlementCheck(orderSigner, settlementData, riskyLenderMask);
         }
+    }
+
+    /// @dev Allocate the delta tracking array from the executionData header.
+    function _allocateDeltas(bytes memory executionData) private pure returns (AssetDelta[] memory deltas) {
+        uint256 n;
+        assembly {
+            n := shr(248, mload(add(add(executionData, 0x20), 2)))
+        }
+        deltas = new AssetDelta[](n);
     }
 
     // ── Merkle-verified action batch ────────────────────────
