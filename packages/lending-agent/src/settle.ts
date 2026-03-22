@@ -492,9 +492,15 @@ export async function executeSettlement(
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
-      // estimateGas throws before oracle calls — so any error here is a tx-level revert
-      console.warn(`  Gas estimation reverted (${msg.slice(0, 120)}) — tx would fail on-chain, skipping`)
-      return 'SKIPPED_INVALID_TX'
+      // Distinguish network/infra errors (429, 5xx, timeout) from actual tx reverts.
+      // Network errors should not cause us to skip the order — fall through and submit.
+      const isNetworkError = /status:\s*[45]\d\d|429|503|timeout|econnrefused|network/i.test(msg)
+      if (isNetworkError) {
+        console.warn(`  Gas estimation failed due to network error (${msg.slice(0, 80)}) — skipping economic check, proceeding`)
+      } else {
+        console.warn(`  Gas estimation reverted (${msg.slice(0, 120)}) — tx would fail on-chain, skipping`)
+        return 'SKIPPED_INVALID_TX'
+      }
     }
   }
 
