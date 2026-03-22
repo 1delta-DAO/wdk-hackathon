@@ -35,7 +35,7 @@ function PositionRow({ position }: { position: Position }) {
   return (
     <div className="flex items-center gap-1.5 px-2 py-1">
       {asset?.logoURI && (
-        <img src={asset.logoURI} alt={asset.symbol} className="w-3.5 h-3.5 rounded-full shrink-0" />
+        <img src={asset.logoURI} alt={asset.symbol} className="w-3.5 h-3.5 rounded-full shrink-0 bg-white" />
       )}
       <span className="text-xs font-medium flex-1 truncate">{asset?.symbol ?? '???'}</span>
       {hasDeposits && (

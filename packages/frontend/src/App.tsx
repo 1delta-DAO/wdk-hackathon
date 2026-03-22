@@ -22,6 +22,7 @@ import {
 import { usePermitSignatures } from './hooks/usePermitSignatures'
 import { useOrderSubmission } from './hooks/useOrderSubmission'
 import { useMorphoMarkets } from './hooks/useMorphoMarkets'
+import { useLendingMeta } from './hooks/useLendingMeta'
 import { protocolToLenderId, type GeneratedLeaf } from './lib/merkle'
 import { SETTLEMENT_ADDRESSES } from './config/settlements'
 import {
@@ -76,6 +77,7 @@ export default function App() {
   )
 
   const { markets: morphoMarkets, loading: morphoLoading, error: morphoError } = useMorphoMarkets(activeChainId)
+  const { lenders: lenderMeta } = useLendingMeta(activeChainId)
 
   const effectiveAccount = observeAddress.match(/^0x[0-9a-fA-F]{40}$/) ? observeAddress : address
   const { positions, loading: positionsLoading, error: positionsError } = useUserPositions(effectiveAccount, activeChainId)
@@ -295,6 +297,7 @@ export default function App() {
                   lenders={lenders}
                   selectedLenders={selectedLenderIds}
                   onToggle={handleToggleLender}
+                  lenderMeta={lenderMeta}
                 />
               </Tile>
 

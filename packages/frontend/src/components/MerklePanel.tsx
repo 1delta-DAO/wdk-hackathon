@@ -121,7 +121,7 @@ export function MerklePanel({ chainId, selectedLenders, selectedTokenPerms, morp
                 {lenderInfo.logoURI && <img src={lenderInfo.logoURI} alt="" className="w-3 h-3 rounded-full" />}
                 <span className="text-[10px] font-bold">{lenderInfo.name}</span>
                 <span className="text-base-content/15 text-[10px]">|</span>
-                {assetInfo.logoURI && <img src={assetInfo.logoURI} alt="" className="w-3 h-3 rounded-full" />}
+                {assetInfo.logoURI && <img src={assetInfo.logoURI} alt="" className="w-3 h-3 rounded-full bg-white" />}
                 <span className="text-[10px] text-base-content/50">{assetInfo.symbol}</span>
               </div>
               <div className="divide-y divide-base-300/20">
