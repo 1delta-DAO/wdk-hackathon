@@ -183,12 +183,18 @@ const RECORD_ACTIONS_TOOL: GenericTool = {
 
 const SWAP_TOOL: GenericTool = {
   name: 'swap',
-  description: 'Swap tokens on Arbitrum via Velora DEX. Use to swap USDT → WETH to top up the gas reserve.',
+  description:
+    'Swap tokens on Arbitrum via Velora DEX. ' +
+    'tokenIn and tokenOut MUST be ERC-20 contract addresses (0x…), NOT symbols. ' +
+    'Arbitrum addresses: USDT=0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9 ' +
+    'WETH=0x82aF49447D8a07e3bd95BD0d56f35241523fBab1 ' +
+    'WBTC=0x2f2a2543B76A4166549F7aaB2e75Bef0aefC5B0f ' +
+    'wstETH=0x5979D7b546E38E414F7E9822514be443A4800529',
   inputSchema: {
     type: 'object',
     properties: {
-      tokenIn:      { type: 'string', description: 'Address of the token to sell' },
-      tokenOut:     { type: 'string', description: 'Address of the token to buy' },
+      tokenIn:      { type: 'string', description: 'Contract address (0x…) of the token to sell' },
+      tokenOut:     { type: 'string', description: 'Contract address (0x…) of the token to buy' },
       amountInUsdt: { type: 'number', description: 'Amount of tokenIn to sell (in human-readable units, e.g. 20 for 20 USDT)' },
     },
     required: ['tokenIn', 'tokenOut', 'amountInUsdt'],
