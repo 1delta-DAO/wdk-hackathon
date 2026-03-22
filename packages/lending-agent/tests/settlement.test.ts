@@ -94,7 +94,7 @@ describe('describeLeaves', () => {
     const repay = descs.find(d => d.op === 'REPAY' && d.protocol === 'AAVE_V3')!
     expect(repay).toBeDefined()
     expect(repay.index).toBe(0)
-    expect(repay.debtToken?.toLowerCase()).toBe(AAVE_DEBT_TOKEN.toLowerCase())
+    expect(repay.vToken?.toLowerCase()).toBe(AAVE_DEBT_TOKEN.toLowerCase())
     expect(repay.pool?.toLowerCase()).toBe(AAVE_POOL.toLowerCase())
   })
 
@@ -148,27 +148,27 @@ describe('buildSettlementTx', () => {
     debtAmount:          1_000_000_000n,  // 1000 USDC (6 decimals)
   }
 
-  it('returns correct chainId and settlement address', () => {
-    const tx = buildSettlementTx(input)
+  it('returns correct chainId and settlement address', async () => {
+    const tx = await buildSettlementTx(input)
     expect(tx.chainId).toBe(42161)
     expect(tx.to.toLowerCase()).toBe(SETTLEMENT.toLowerCase())
   })
 
-  it('starts with settleWithFlashLoan selector (0x...)', () => {
-    const tx = buildSettlementTx(input)
+  it('starts with settleWithFlashLoan selector (0x...)', async () => {
+    const tx = await buildSettlementTx(input)
     // settleWithFlashLoan selector
     expect(tx.data.startsWith('0x')).toBe(true)
     expect(tx.data.length).toBeGreaterThan(10)
   })
 
-  it('adds 0.01% buffer to flash amount', () => {
-    const tx = buildSettlementTx(input)
+  it('adds 0.01% buffer to flash amount', async () => {
+    const tx = await buildSettlementTx(input)
     // 1_000_000_000 + 1_000_000_000/10_000 + 1 = 1_000_100_001
     expect(tx.flashAmount).toBe(1_000_100_001n)
   })
 
-  it('borrow amount is debtAmount plus fee headroom', () => {
-    const tx = buildSettlementTx(input)
+  it('borrow amount is debtAmount plus fee headroom', async () => {
+    const tx = await buildSettlementTx(input)
     // borrowAmount = debtAmount + debtAmount * maxFeeBps / 1e7
     // maxFeeBps = 50_000, so +0.5% of debtAmount
     const debtAmount = 1_000_000_000n
@@ -176,7 +176,7 @@ describe('buildSettlementTx', () => {
     expect(tx.borrowAmount).toBe(expected)
   })
 
-  it('wraps in multicall when permits are present', () => {
+  it('wraps in multicall when permits are present', async () => {
     const inputWithPermits = {
       ...input,
       order: {
@@ -206,13 +206,13 @@ describe('buildSettlementTx', () => {
         },
       },
     }
-    const tx = buildSettlementTx(inputWithPermits)
+    const tx = await buildSettlementTx(inputWithPermits)
     // multicall selector = 0xac9650d8
     expect(tx.data.startsWith('0xac9650d8')).toBe(true)
   })
 
-  it('always wraps in multicall (approvals are always needed)', () => {
-    const tx = buildSettlementTx(input)
+  it('always wraps in multicall (approvals are always needed)', async () => {
+    const tx = await buildSettlementTx(input)
     // multicall selector = 0xac9650d8
     expect(tx.data.startsWith('0xac9650d8')).toBe(true)
   })
@@ -220,14 +220,14 @@ describe('buildSettlementTx', () => {
 
 // ─── E2E: full runSettlementFlow with mocked order backend ────────────────────
 
-const canRunE2e = !!(process.env.ANTHROPIC_API_KEY && process.env.WDK_SEED)
+const canRunE2e = !!(process.env.OPENAI_API_KEY && process.env.WDK_SEED)
 
 describe.skipIf(!canRunE2e)(
   'runSettlementFlow e2e (requires ANTHROPIC_API_KEY + WDK_SEED)',
   () => {
     beforeAll(async () => {
       process.env.DRY_RUN = 'true'
-      process.env.MODEL ??= 'claude-haiku-4-5'
+      process.env.MODEL ??= 'gpt-4o-mini'
 
       // Stub fetch so fetchOrder returns our mock order without a real backend.
       // All other fetches (1delta MCP) are forwarded to the real implementation.
@@ -248,30 +248,16 @@ describe.skipIf(!canRunE2e)(
     })
 
     it('agent proposes a migration and settlement tx is built', async () => {
-      const { connectOneDelta, connectWdk } = await import('../src/mcp.js')
       const { runSettlementFlow } = await import('../src/main.js')
 
-      const [oneDeltaClient, wdkClient] = await Promise.all([
-        connectOneDelta(),
-        connectWdk(),
-      ])
+      const result = await runSettlementFlow('test-order-1', 42161)
 
-      try {
-        const result = await runSettlementFlow(
-          { oneDeltaClient, wdkClient },
-          'test-order-1',
-          42161,
-        )
+      // In DRY_RUN mode the result is either the agent's text (no migration found)
+      // or 'DRY_RUN' (migration proposed and tx built)
+      expect(typeof result).toBe('string')
+      expect(result.length).toBeGreaterThan(0)
 
-        // In DRY_RUN mode the result is either the agent's text (no migration found)
-        // or 'DRY_RUN' (migration proposed and tx built)
-        expect(typeof result).toBe('string')
-        expect(result.length).toBeGreaterThan(0)
-
-        console.log('Settlement flow result:', result)
-      } finally {
-        await Promise.allSettled([oneDeltaClient.close(), wdkClient.close()])
-      }
+      console.log('Settlement flow result:', result)
     }, 180_000)
   },
 )
