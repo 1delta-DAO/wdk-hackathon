@@ -1,6 +1,63 @@
 import { DRY_RUN } from './config.js'
 import type { SettlementContext, SourceInfo, DestinationInfo } from './context.js'
 
+// ── Portfolio agent ────────────────────────────────────────────────────────────
+
+export interface PortfolioState {
+  walletAddress: string
+  chainId: number
+  ethBalance: string
+  ethUsd: number
+  usdtBalance: string
+  usdtUsd: number
+  wstethBalance: string
+  wstethUsd: number
+  aaveUsdtDeposited: string
+  aaveUsdtUsd: number
+  ethPriceUsd: number
+}
+
+export function buildPortfolioSystemPrompt(state: PortfolioState): string {
+  const totalUsd = state.ethUsd + state.usdtUsd + state.wstethUsd + state.aaveUsdtUsd
+  const ethReserveEth = state.ethPriceUsd > 0 ? (10 / state.ethPriceUsd).toFixed(4) : '?'
+
+  const dryRunNote = DRY_RUN
+    ? '\nDRY RUN MODE: Do NOT execute any swap or lend actions. Only call record_actions to describe what you would do, then explain your reasoning.'
+    : ''
+
+  return `You are the autonomous treasury manager for a USDT lending settlement solver on Arbitrum.
+
+YOUR ROLE:
+- You earn USDT fees by settling user loan migrations (position rebalances between lending protocols)
+- You spend ETH for gas on Arbitrum (~$0.01 per settlement transaction)
+- You must keep the solver wallet healthy so it can keep filling orders 24/7
+
+CURRENT PORTFOLIO (chain: ${state.chainId}):
+  Wallet:        ${state.walletAddress}
+  ETH:           ${Number(state.ethBalance).toFixed(6)} ETH  (~$${state.ethUsd.toFixed(2)})
+  USDT:          ${Number(state.usdtBalance).toFixed(2)} USDT
+  wstETH:        ${Number(state.wstethBalance).toFixed(6)} wstETH  (~$${state.wstethUsd.toFixed(2)})
+  Aave USDT:     ${Number(state.aaveUsdtDeposited).toFixed(2)} aUSDT  (~$${state.aaveUsdtUsd.toFixed(2)})
+  ETH price:     $${state.ethPriceUsd.toFixed(2)}
+  Total:         ~$${totalUsd.toFixed(2)}
+
+STRATEGY RULES (apply in priority order):
+1. GAS RESERVE — Keep at least $10 worth of ETH (~${ethReserveEth} ETH, covers ~1000 Arbitrum txs).
+   If ETH < $5, swap enough USDT to bring ETH balance up to $10.
+2. USDT YIELD — If wallet USDT > $20, deposit the excess above a $10 liquid buffer into Aave V3
+   to earn supply APY. Aave USDT on Arbitrum is the primary yield destination.
+3. STAKING YIELD — If ETH > $15 (comfortably above reserve), consider swapping half the excess
+   ETH into wstETH to earn passive Ethereum staking yield.
+4. NO ACTION — If all balances are already healthy, do nothing. Clearly explain why.
+
+INSTRUCTIONS:
+1. Analyse the current portfolio against the strategy rules above.
+2. Call record_actions ONCE with every action you intend to take (or a single no_action if nothing needed).
+3. Then execute each action using the WDK tools (swap, lend supply, lend withdraw, etc.).
+4. For every decision explain the WHY — which rule triggered it and what outcome you expect.
+5. Use Arbitrum (chain id 42161) for all operations.${dryRunNote}`
+}
+
 export interface FlatOption {
   index: number
   source: SourceInfo
