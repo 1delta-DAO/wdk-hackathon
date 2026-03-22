@@ -310,9 +310,15 @@ export function buildSettlementTx(input: SettlementInput): {
 
   // Extract spenders from leaf data:
   //   Compound V3 repay/deposit: data = [20: comet]
-  //   Aave repay: data = [1: mode][20: debtToken][20: pool] → pool at offset 21
+  //   Aave repay: data = [1: mode][20: vToken][20: pool] → pool at offset 21
   //   Aave deposit: data = [20: pool]
+  //   Morpho: data = [20: loan][20: coll][20: oracle][20: irm][16: lltv][1: flags][20: morpho]
+  //     → morpho pool at byte offset 97
   const spenderFromLeaf = (leaf: MerkleLeaf): Address => {
+    const isMorpho = leaf.lender >= 4000 && leaf.lender < 5000
+    if (isMorpho) {
+      return `0x${leaf.data.slice(2 + 97 * 2, 2 + 117 * 2)}` as Address
+    }
     const isAave = leaf.lender < 2000
     const isRepay = leaf.op === 2
     const offset = isAave && isRepay ? 21 : 0
