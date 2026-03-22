@@ -57,7 +57,7 @@ export default function App() {
   const connectedChainId = useChainId()
   const { switchChain } = useSwitchChain()
 
-  const [selectedChainId, setSelectedChainId] = useState<number | null>(null)
+  const [selectedChainId, setSelectedChainId] = useState<number | null>(42161)
   const [observeAddress, setObserveAddress] = useState<string>('')
   const [selectedLenderIds, setSelectedLenderIds] = useState<Set<string>>(new Set())
   const [selectedTokenPerms, setSelectedTokenPerms] = useState<SelectedTokenPerms>({})

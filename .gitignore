@@ -9,6 +9,7 @@ build/
 .DS_Store
 .tmp
 wrangler.toml
+!wrangler.toml.example
 
 # Solidity / Foundry / Hardhat
 cache/

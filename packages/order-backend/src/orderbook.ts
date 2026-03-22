@@ -34,6 +34,10 @@ export class Orderbook implements DurableObject {
       return this.updateOrderStatus(id, request)
     }
 
+    if (request.method === 'DELETE' && url.pathname === '/orders') {
+      return this.clearAll()
+    }
+
     if (request.method === 'DELETE' && url.pathname.startsWith('/orders/')) {
       const id = url.pathname.slice('/orders/'.length)
       return this.cancelOrder(id)
@@ -122,6 +126,11 @@ export class Orderbook implements DurableObject {
     await this.state.storage.put(`order:${id}`, order)
 
     return json({ id, status })
+  }
+
+  private async clearAll(): Promise<Response> {
+    await this.state.storage.deleteAll()
+    return json({ status: 'cleared' })
   }
 
   private async cancelOrder(id: string): Promise<Response> {

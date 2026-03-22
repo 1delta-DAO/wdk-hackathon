@@ -16,6 +16,7 @@ interface Env {
  *   GET    /v1/orders              — List open orders (query: ?chainId=&signer=&status=&limit=)
  *   GET    /v1/orders/:id          — Get a specific order
  *   PATCH  /v1/orders/:id          — Update order status (body: {status: "filled"|"cancelled"})
+ *   DELETE /v1/orders              — Clear all orders for a chain (query: ?chainId=)
  *   DELETE /v1/orders/:id          — Cancel an order
  *   GET    /v1/chains              — List chain IDs that have orders
  */
@@ -74,6 +75,15 @@ export default {
         if (k !== 'chainId') doUrl.searchParams.set(k, v)
       }
       return stub.fetch(new Request(doUrl.toString()))
+    }
+
+    // DELETE /v1/orders?chainId= — clear all orders for a chain
+    if (request.method === 'DELETE' && apiPath === '/orders') {
+      const chainId = parseInt(url.searchParams.get('chainId') || '0')
+      if (!chainId) return json({ error: 'Query param chainId is required' }, 400)
+
+      const stub = getOrderbookStub(env, chainId)
+      return stub.fetch(new Request('https://do/orders', { method: 'DELETE' }))
     }
 
     // GET/PATCH/DELETE /v1/orders/:id?chainId=
