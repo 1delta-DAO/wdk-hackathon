@@ -8,6 +8,7 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "dev": "tsc && node --env-file=.env dist/index.js",
+    "portfolio:test": "tsc && DRY_RUN=true node --env-file=.env dist/scripts/test-portfolio.js",
     "worker:dev": "wrangler dev worker.ts",
     "worker:deploy": "wrangler deploy worker.ts",
     "worker:tail": "wrangler tail",

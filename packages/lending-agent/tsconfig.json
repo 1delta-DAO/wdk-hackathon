@@ -15,6 +15,6 @@
     "resolveJsonModule": true,
     "types": ["@cloudflare/workers-types", "node"]
   },
-  "include": ["index.ts", "worker.ts", "src/**/*"],
+  "include": ["index.ts", "worker.ts", "src/**/*", "scripts/**/*"],
   "exclude": ["dist", "node_modules"]
 }
