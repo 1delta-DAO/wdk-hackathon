@@ -1,5 +1,6 @@
 import type { Address } from 'viem'
-import { Check, Crosshair } from 'react-feather'
+import { Check } from 'react-feather'
+import { Reticle } from './icons/Reticle'
 import type { LenderProtocol } from '../data/lenders'
 import {
   PERMISSION_DEFS,
@@ -113,7 +114,7 @@ export function PermissionPanel({
                 signed ? 'bg-success/10' : 'bg-base-300/50'
               }`}>
               <div className="flex items-center gap-1.5 min-w-0">
-                <Crosshair size={12} className={signed ? 'text-success shrink-0' : 'text-base-content/20 shrink-0'} />
+                <Reticle size={12} className={signed ? 'text-success shrink-0' : 'text-base-content/20 shrink-0'} />
                 <div className="min-w-0">
                   <div className="text-xs font-medium truncate">{row.label}</div>
                   <div className="text-[10px] text-base-content/30">{row.description}</div>
