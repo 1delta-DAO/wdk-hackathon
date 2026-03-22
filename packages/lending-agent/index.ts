@@ -18,7 +18,7 @@
 
 import { createServer, IncomingMessage, ServerResponse } from 'node:http'
 import { connectOneDelta, connectWdk, callTool } from './src/mcp.js'
-import { runAllSettlements } from './src/main.js'
+import { runAllSettlements, runSettlementFlow } from './src/main.js'
 
 const PORT = Number(process.env.PORT ?? 3000)
 const API_SECRET = process.env.API_SECRET ?? ''
@@ -52,12 +52,12 @@ async function readBody (req: IncomingMessage): Promise<Record<string, unknown>>
   })
 }
 
-// ── Settlement helper ─────────────────────────────────────────────────────────
+// ── Settlement helpers ────────────────────────────────────────────────────────
 
-async function runSettle (chainId: number) {
+async function withClients<T> (fn: (clients: { oneDeltaClient: Awaited<ReturnType<typeof connectOneDelta>>, wdkClient: Awaited<ReturnType<typeof connectWdk>> }) => Promise<T>): Promise<T> {
   const [oneDeltaClient, wdkClient] = await Promise.all([connectOneDelta(), connectWdk()])
   try {
-    return await runAllSettlements({ oneDeltaClient, wdkClient }, chainId)
+    return await fn({ oneDeltaClient, wdkClient })
   } finally {
     await Promise.allSettled([oneDeltaClient.close(), wdkClient.close()])
   }
@@ -85,6 +85,7 @@ const server = createServer(async (req, res) => {
   }
 
   // POST /settle/all  (Bearer-protected)
+  // body: { chainId: number, forceMigration?: boolean }
   if (req.method === 'POST' && url.pathname === '/settle/all') {
     if (!bearerOk(req)) {
       res.writeHead(401, { 'WWW-Authenticate': 'Bearer' })
@@ -94,9 +95,29 @@ const server = createServer(async (req, res) => {
     const body = await readBody(req)
     const chainId = Number(body.chainId)
     if (!chainId) return json(res, 400, { error: 'chainId required' })
+    const forceMigration = body.forceMigration === true
 
-    const results = await runSettle(chainId)
+    const results = await withClients(clients => runAllSettlements(clients, chainId, forceMigration))
     return json(res, 200, { results })
+  }
+
+  // POST /settle/order  (Bearer-protected)
+  // body: { orderId: string, chainId: number, forceMigration?: boolean }
+  if (req.method === 'POST' && url.pathname === '/settle/order') {
+    if (!bearerOk(req)) {
+      res.writeHead(401, { 'WWW-Authenticate': 'Bearer' })
+      return res.end(JSON.stringify({ error: 'Unauthorized' }))
+    }
+
+    const body = await readBody(req)
+    const orderId = String(body.orderId ?? '')
+    const chainId = Number(body.chainId)
+    if (!orderId) return json(res, 400, { error: 'orderId required' })
+    if (!chainId) return json(res, 400, { error: 'chainId required' })
+    const forceMigration = body.forceMigration === true
+
+    const result = await withClients(clients => runSettlementFlow(clients, orderId, chainId, forceMigration))
+    return json(res, 200, { orderId, result })
   }
 
   json(res, 404, { error: 'Not found' })
@@ -113,10 +134,10 @@ async function cronJob () {
   for (const chainId of CRON_CHAIN_IDS) {
     console.log(`[cron] Processing chain ${chainId}…`)
     try {
-      const results = await runSettle(chainId)
-      const settled = results.filter(r => !r.result.startsWith('ERROR') && r.result !== 'DRY_RUN')
-      const skipped = results.filter(r => r.result.includes('no action') || r.result.includes('NO MIGRATION'))
-      const errors  = results.filter(r => r.result.startsWith('ERROR'))
+      const results = await withClients(clients => runAllSettlements(clients, chainId))
+      const settled = results.filter((r: { result: string }) => !r.result.startsWith('ERROR') && r.result !== 'DRY_RUN')
+      const skipped = results.filter((r: { result: string }) => r.result.includes('no action') || r.result.includes('NO MIGRATION'))
+      const errors  = results.filter((r: { result: string }) => r.result.startsWith('ERROR'))
       console.log(`[cron] chain ${chainId}: ${settled.length} settled, ${skipped.length} skipped, ${errors.length} errors`)
     } catch (err) {
       console.error(`[cron] chain ${chainId} failed:`, err instanceof Error ? err.message : err)
