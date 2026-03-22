@@ -1,15 +1,12 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import { useReadContracts } from 'wagmi'
-import { erc20Abi, getAddress } from 'viem'
+import { erc20Abi } from 'viem'
 import type { AaveTokenPermission } from '../data/lenders'
+import { useTokenList } from '../hooks/useTokenList'
 
-/** Token icon from Trustwallet assets CDN, with fallback to a colored circle with initial */
-function TokenIcon({ address, symbol, size = 18 }: { address: string; symbol?: string; size?: number }) {
-  const [errored, setErrored] = useState(false)
-  const checksummed = (() => { try { return getAddress(address) } catch { return address } })()
-  const src = `https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/arbitrum/assets/${checksummed}/logo.png`
-
-  if (errored || !address) {
+/** Token icon using logoURI from the token list API, with fallback to a colored circle */
+function TokenIcon({ logoURI, symbol, size = 18 }: { logoURI?: string; symbol?: string; size?: number }) {
+  if (!logoURI) {
     const letter = symbol ? symbol[0].toUpperCase() : '?'
     return (
       <span
@@ -23,12 +20,11 @@ function TokenIcon({ address, symbol, size = 18 }: { address: string; symbol?: s
 
   return (
     <img
-      src={src}
+      src={logoURI}
       alt={symbol ?? ''}
       width={size}
       height={size}
       className="rounded-full shrink-0"
-      onError={() => setErrored(true)}
     />
   )
 }
@@ -47,6 +43,8 @@ export function tokenPermKey(protocolId: string, perm: AaveTokenPermission): str
 }
 
 export function AaveTokenSelector({ protocolLabel, permissions, selectedKeys, onToggle, onSelectAll, chainId }: Props) {
+  const { tokens } = useTokenList(chainId)
+
   const byUnderlying = useMemo(() => {
     const map = new Map<string, AaveTokenPermission[]>()
     for (const p of permissions) {
@@ -100,13 +98,14 @@ export function AaveTokenSelector({ protocolLabel, permissions, selectedKeys, on
 
       <div className="max-h-48 overflow-y-auto divide-y divide-base-300/30">
         {Array.from(byUnderlying.entries()).map(([underlying, perms]) => {
-          const symbol = tokenSymbols[underlying]
+          const meta = tokens[underlying.toLowerCase()]
+          const symbol = meta?.symbol ?? tokenSymbols[underlying]
           const shortAddr = `${underlying.slice(0, 6)}...${underlying.slice(-4)}`
 
           return (
             <div key={underlying} className="px-2 py-1">
               <div className="flex items-center gap-1.5 text-[10px] font-medium text-base-content/50 mb-0.5">
-                <TokenIcon address={underlying} symbol={symbol} size={16} />
+                <TokenIcon logoURI={meta?.logoURI} symbol={symbol} size={16} />
                 <span>
                   {symbol ?? shortAddr}
                   {symbol && <span className="text-base-content/20 ml-1">{shortAddr}</span>}

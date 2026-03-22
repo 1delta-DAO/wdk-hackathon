@@ -281,6 +281,7 @@ contract AaveToMorphoMigrationTest is Test {
         bytes memory executionData = abi.encodePacked(
             uint8(2),                 // 2 pre-actions
             uint8(2),                 // 2 post-actions
+            uint8(2),                 // 2 unique assets
             address(0),               // no fee recipient
             // Pre: repay WETH debt on Aave
             _action(WETH, type(uint112).max, user, 2, 0, repayData, pr0),
@@ -487,7 +488,7 @@ contract AaveToMorphoMigrationTest is Test {
         bytes memory sig = _signOrder(userPk, root, deadline, 0, address(0), hex"");
 
         bytes memory executionData = abi.encodePacked(
-            uint8(2), uint8(2), address(0),
+            uint8(2), uint8(2), uint8(2), address(0),
             _action(WETH, type(uint112).max, user, 2, 0, repayData, pr0),
             _action(WSTETH, type(uint112).max, address(settlement), 3, 0, withdrawData, pr1),
             _action(WSTETH, 0, user, 0, 4000, morphoDepositData, pr2),

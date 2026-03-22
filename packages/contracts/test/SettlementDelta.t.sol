@@ -120,8 +120,8 @@ contract SettlementDeltaTest is Test {
         return abi.encodePacked(root, uint16(0));
     }
 
-    function _execHeader(uint8 numPre, uint8 numPost) internal pure returns (bytes memory) {
-        return abi.encodePacked(numPre, numPost, address(0));
+    function _execHeader(uint8 numPre, uint8 numPost, uint8 numAssets) internal pure returns (bytes memory) {
+        return abi.encodePacked(numPre, numPost, numAssets, address(0));
     }
 
     function _action(
@@ -157,7 +157,7 @@ contract SettlementDeltaTest is Test {
 
         bytes memory od = _orderData(root);
         bytes memory ed = abi.encodePacked(
-            _execHeader(1, 1),
+            _execHeader(1, 1, 1),
             // Pre: withdraw 100 WETH → delta[WETH] = +100
             _action(WETH, uint112(100), 3, d0, p0),
             // Post: deposit 100 WETH → delta[WETH] = +100 - 100 = 0
@@ -196,7 +196,7 @@ contract SettlementDeltaTest is Test {
 
         bytes memory od = _orderData(root);
         bytes memory ed = abi.encodePacked(
-            _execHeader(2, 2),
+            _execHeader(2, 2, 2),
             _action(WETH, uint112(100), 3, dWithdraw, pr0),
             _action(USDC, uint112(500), 2, dRepay, pr1),
             _action(WETH, uint112(100), 0, dDeposit, pr2),
@@ -223,7 +223,7 @@ contract SettlementDeltaTest is Test {
 
         bytes memory od = _orderData(root);
         bytes memory ed = abi.encodePacked(
-            _execHeader(1, 1),
+            _execHeader(1, 1, 1),
             // Pre: withdraw 100 WETH
             _action(WETH, uint112(100), 3, d0, p0),
             // Post: deposit only 50 WETH → surplus of 50
@@ -253,7 +253,7 @@ contract SettlementDeltaTest is Test {
 
         bytes memory od = _orderData(root);
         bytes memory ed = abi.encodePacked(
-            _execHeader(1, 1),
+            _execHeader(1, 1, 1),
             // Pre: withdraw 50 WETH
             _action(WETH, uint112(50), 3, d0, p0),
             // Post: deposit 100 WETH → deficit of 50
@@ -292,7 +292,7 @@ contract SettlementDeltaTest is Test {
 
         bytes memory od = _orderData(root);
         bytes memory ed = abi.encodePacked(
-            _execHeader(2, 2),
+            _execHeader(2, 2, 2),
             // WETH balanced: withdraw 100, deposit 100
             _action(WETH, uint112(100), 3, dWithdraw, pr0),
             _action(USDC, uint112(500), 2, dRepay, pr1),
@@ -327,7 +327,7 @@ contract SettlementDeltaTest is Test {
 
         bytes memory od = _orderData(root);
         bytes memory ed = abi.encodePacked(
-            _execHeader(1, 1),
+            _execHeader(1, 1, 2),
             _action(WETH, uint112(100), 3, dWithdraw, p0),
             _action(USDC, uint112(200), 0, dDeposit, p1)
         );
@@ -355,7 +355,7 @@ contract SettlementDeltaTest is Test {
 
         bytes memory od = _orderData(root);
         bytes memory ed = abi.encodePacked(
-            _execHeader(1, 1),
+            _execHeader(1, 1, 2),
             _action(WETH, uint112(100), 3, dWithdraw, p0),
             _action(USDC, uint112(200), 0, dDeposit, p1)
         );
@@ -368,7 +368,7 @@ contract SettlementDeltaTest is Test {
 
     function test_balanced_noActions() public {
         bytes memory od = abi.encodePacked(bytes32(0), uint16(0));
-        bytes memory ed = abi.encodePacked(_execHeader(0, 0));
+        bytes memory ed = abi.encodePacked(_execHeader(0, 0, 0));
 
         harness.executeSettlement(CALLER, od, ed, bytes(""));
     }

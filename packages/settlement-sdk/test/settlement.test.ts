@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest'
 import { Settlement } from '../src/settlement.js'
-import { pairHash } from '../src/merkle.js'
 import { AmountSentinel } from '../src/constants.js'
 import type { Hex } from 'viem'
 
@@ -21,13 +20,28 @@ const V_DEBT_SRC = '0x0000000000000000000000000000000000000333' as const
 const V_DEBT_DST = '0x0000000000000000000000000000000000000444' as const
 const A_WBTC = '0x0000000000000000000000000000000000000555' as const
 
+const SRC_AAVE: Settlement.AaveProtocol = {
+  protocol: 'aave',
+  pool: { pool: POOL_PRIME, aToken: A_WETH_SRC, debtToken: V_DEBT_SRC },
+}
+
+const DST_AAVE: Settlement.AaveProtocol = {
+  protocol: 'aave',
+  pool: { pool: POOL_CORE, aToken: A_WETH_DST, debtToken: V_DEBT_DST },
+}
+
+const CORE_AAVE: Settlement.AaveProtocol = {
+  protocol: 'aave',
+  pool: { pool: POOL_CORE, aToken: A_WETH_SRC, debtToken: V_DEBT_SRC },
+}
+
 describe('Settlement.buildMigration', () => {
   it('produces valid calldata for same-asset migration', () => {
     const result = Settlement.buildMigration({
       collateralAsset: WETH,
       debtAsset: USDC,
-      source: { pool: POOL_PRIME, aToken: A_WETH_SRC, debtToken: V_DEBT_SRC },
-      dest: { pool: POOL_CORE, aToken: A_WETH_DST, debtToken: V_DEBT_DST },
+      source: SRC_AAVE,
+      dest: DST_AAVE,
       user: USER,
       settlement: SETTLEMENT,
       borrowAmount: 1_000_000_001n,
@@ -40,13 +54,15 @@ describe('Settlement.buildMigration', () => {
     // orderData: 32 (root) + 2 (sdLen=0) = 34 bytes
     expect((result.orderData.length - 2) / 2).toBe(34)
 
-    // executionData: header (22) + 4 actions
+    // executionData: header (23) + 4 actions
     const edLen = (result.executionData.length - 2) / 2
-    expect(edLen).toBeGreaterThan(22)
+    expect(edLen).toBeGreaterThan(23)
 
     // Header: numPre=2, numPost=2
     expect(result.executionData.slice(2, 4)).toBe('02')
     expect(result.executionData.slice(4, 6)).toBe('02')
+    // numAssets=2 (WETH + USDC)
+    expect(result.executionData.slice(6, 8)).toBe('02')
   })
 })
 
@@ -55,8 +71,8 @@ describe('Settlement.buildSimpleMigration', () => {
     const result = Settlement.buildSimpleMigration({
       collateralAsset: WETH,
       debtAsset: USDC,
-      source: { pool: POOL_PRIME, aToken: A_WETH_SRC, debtToken: V_DEBT_SRC },
-      dest: { pool: POOL_CORE, aToken: A_WETH_DST, debtToken: V_DEBT_DST },
+      source: SRC_AAVE,
+      dest: DST_AAVE,
       user: USER,
       settlement: SETTLEMENT,
       borrowAmount: 1_000_000_001n,
@@ -74,19 +90,14 @@ describe('Settlement.buildCollateralSwap', () => {
       collateralIn: WETH,
       collateralOut: WBTC,
       debtAsset: USDC,
-      pool: {
-        pool: POOL_CORE,
-        aToken: A_WETH_SRC,
-        debtToken: V_DEBT_SRC,
-        aTokenOut: A_WBTC,
-      },
+      protocol: CORE_AAVE,
       oracle: ORACLE,
       swapTolerance: 50_000n,
       user: USER,
       settlement: SETTLEMENT,
       borrowAmount: 500_000_000n,
       swap: {
-        amountIn: 0n, // balance-based
+        amountIn: 0n,
         target: '0x0000000000000000000000000000000000000999' as const,
         calldata: '0xdeadbeef' as Hex,
       },
@@ -111,12 +122,7 @@ describe('Settlement.buildCollateralSwap', () => {
       collateralIn: WETH,
       collateralOut: WBTC,
       debtAsset: USDC,
-      pool: {
-        pool: POOL_CORE,
-        aToken: A_WETH_SRC,
-        debtToken: V_DEBT_SRC,
-        aTokenOut: A_WBTC,
-      },
+      protocol: CORE_AAVE,
       oracle: ORACLE,
       swapTolerance: 50_000n,
       user: USER,
@@ -144,8 +150,8 @@ describe('Settlement.buildDebtSwap', () => {
       debtIn: USDC,
       debtOut: USDT,
       collateralAsset: WETH,
-      sourcePool: { pool: POOL_CORE, aToken: A_WETH_SRC, debtToken: V_DEBT_SRC },
-      destPool: { pool: POOL_CORE, aToken: A_WETH_DST, debtToken: V_DEBT_DST },
+      source: CORE_AAVE,
+      dest: { ...CORE_AAVE, pool: { pool: POOL_CORE, aToken: A_WETH_DST, debtToken: V_DEBT_DST } },
       oracle: ORACLE,
       swapTolerance: 50_000n,
       user: USER,
@@ -172,7 +178,7 @@ describe('Settlement.buildClosePosition', () => {
     const result = Settlement.buildClosePosition({
       collateralAsset: WETH,
       debtAsset: USDT,
-      pool: { pool: POOL_CORE, aToken: A_WETH_SRC, debtToken: V_DEBT_SRC },
+      protocol: CORE_AAVE,
       oracle: ORACLE,
       swapTolerance: 50_000n,
       user: USER,
@@ -196,7 +202,7 @@ describe('Settlement.buildClosePosition', () => {
     const result = Settlement.buildClosePosition({
       collateralAsset: WETH,
       debtAsset: USDT,
-      pool: { pool: POOL_CORE, aToken: A_WETH_SRC, debtToken: V_DEBT_SRC },
+      protocol: CORE_AAVE,
       oracle: ORACLE,
       swapTolerance: 50_000n,
       user: USER,

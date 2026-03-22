@@ -263,17 +263,23 @@ function encodeAction(action: ActionCalldata): Hex {
  * Encode executionData.
  *
  * Format:
- *   [1: numPre][1: numPost][20: feeRecipient]
+ *   [1: numPre][1: numPost][1: numAssets][20: feeRecipient]
  *   [actions...]
  */
 export function encodeExecutionData(
   preActions: ActionCalldata[],
   postActions: ActionCalldata[],
   feeRecipient: Address = '0x0000000000000000000000000000000000000000',
+  numAssets?: number,
 ): Hex {
+  // Auto-compute numAssets from unique assets across all actions if not provided
+  const assetCount = numAssets ?? new Set(
+    [...preActions, ...postActions].map(a => a.asset.toLowerCase()),
+  ).size
+
   const header = encodePacked(
-    ['uint8', 'uint8', 'address'],
-    [preActions.length, postActions.length, feeRecipient],
+    ['uint8', 'uint8', 'uint8', 'address'],
+    [preActions.length, postActions.length, assetCount, feeRecipient],
   )
 
   const actionParts = [...preActions, ...postActions].map(encodeAction)
@@ -290,6 +296,10 @@ export interface SwapParams {
   assetOut: Address
   /** Set to 0n for balance-based swap (recommended after max withdrawals) */
   amountIn: bigint
+  /** Index into the delta array for assetIn */
+  deltaIdxIn: number
+  /** Index into the delta array for assetOut */
+  deltaIdxOut: number
   target: Address
   calldata: Hex
 }
@@ -299,6 +309,7 @@ export interface SwapParams {
  *
  * Per swap format:
  *   [20: assetIn][20: assetOut][14: amountIn]
+ *   [1: deltaIdxIn][1: deltaIdxOut]
  *   [20: target][2: calldataLen][calldataLen: calldata]
  */
 export function encodeFillerCalldata(swaps: SwapParams[]): Hex {
@@ -309,8 +320,8 @@ export function encodeFillerCalldata(swaps: SwapParams[]): Hex {
     const cdLen = (s.calldata.length - 2) / 2
     parts.push(
       encodePacked(
-        ['address', 'address', 'uint112', 'address', 'uint16'],
-        [s.assetIn, s.assetOut, s.amountIn, s.target, cdLen],
+        ['address', 'address', 'uint112', 'uint8', 'uint8', 'address', 'uint16'],
+        [s.assetIn, s.assetOut, s.amountIn, s.deltaIdxIn, s.deltaIdxOut, s.target, cdLen],
       ),
     )
     parts.push(s.calldata)

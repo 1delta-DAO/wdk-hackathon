@@ -249,7 +249,7 @@ export namespace Settlement {
     /** Borrow amount (to repay flash loan) */
     borrowAmount: bigint
     /** DEX swap params */
-    swap: Omit<SwapParams, 'assetIn' | 'assetOut'>
+    swap: Omit<SwapParams, 'assetIn' | 'assetOut' | 'deltaIdxIn' | 'deltaIdxOut'>
     /** Fee recipient */
     feeRecipient?: Address
     /** Health factor conditions */
@@ -324,9 +324,13 @@ export namespace Settlement {
     const settlementData = encodeSettlementData(conversions, params.conditions)
     const orderData = encodeOrderData(root, settlementData)
     const executionData = encodeExecutionData(preActions, postActions, params.feeRecipient)
+    // Delta layout: 0=debtAsset (repay pre, borrow post), 1=collateralIn (withdraw pre),
+    //               2=collateralOut (deposit post, swap output)
     const fillerCalldata = encodeFillerCalldata([{
       assetIn: params.collateralIn,
       assetOut: params.collateralOut,
+      deltaIdxIn: 1,   // collateralIn slot
+      deltaIdxOut: 2,  // collateralOut slot
       ...params.swap,
     }])
 
@@ -353,7 +357,7 @@ export namespace Settlement {
     settlement: Address
     /** Amount to borrow of new debt asset */
     borrowAmount: bigint
-    swap: Omit<SwapParams, 'assetIn' | 'assetOut'>
+    swap: Omit<SwapParams, 'assetIn' | 'assetOut' | 'deltaIdxIn' | 'deltaIdxOut'>
     feeRecipient?: Address
     conditions?: Condition[]
   }
@@ -406,9 +410,13 @@ export namespace Settlement {
     const settlementData = encodeSettlementData(conversions, params.conditions)
     const orderData = encodeOrderData(root, settlementData)
     const executionData = encodeExecutionData(preActions, postActions, params.feeRecipient)
+    // Delta layout: 0=debtIn (repay pre), 1=debtOut (borrow post, swap input)
+    // Swap converts debtOut→debtIn, so idxIn=1 (debtOut), idxOut=0 (debtIn)
     const fillerCalldata = encodeFillerCalldata([{
       assetIn: params.debtOut,
       assetOut: params.debtIn,
+      deltaIdxIn: 1,   // debtOut slot
+      deltaIdxOut: 0,  // debtIn slot
       ...params.swap,
     }])
 
@@ -429,7 +437,7 @@ export namespace Settlement {
     swapTolerance: bigint
     user: Address
     settlement: Address
-    swap: Omit<SwapParams, 'assetIn' | 'assetOut'>
+    swap: Omit<SwapParams, 'assetIn' | 'assetOut' | 'deltaIdxIn' | 'deltaIdxOut'>
     conditions?: Condition[]
   }
 
@@ -478,9 +486,13 @@ export namespace Settlement {
     const settlementData = encodeSettlementData(conversions, params.conditions)
     const orderData = encodeOrderData(root, settlementData)
     const executionData = encodeExecutionData(preActions, [])
+    // Delta layout: 0=debtAsset (repay pre), 1=collateralAsset (withdraw pre, swap input)
+    // Swap converts collateral→debt, so idxIn=1 (collateral), idxOut=0 (debt)
     const fillerCalldata = encodeFillerCalldata([{
       assetIn: params.collateralAsset,
       assetOut: params.debtAsset,
+      deltaIdxIn: 1,   // collateral slot
+      deltaIdxOut: 0,  // debt slot
       ...params.swap,
     }])
 

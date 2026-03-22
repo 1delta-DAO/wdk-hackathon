@@ -1,11 +1,13 @@
 import { useMemo } from 'react'
 import { Shield, TrendingUp, TrendingDown, AlertTriangle } from 'react-feather'
 import type { LenderPositions, Position } from '../hooks/useUserPositions'
+import type { LenderInfo } from '../hooks/useLendingMeta'
 
 interface Props {
   positions: LenderPositions[]
   loading: boolean
   error: string | null
+  lenderMeta?: Record<string, LenderInfo>
 }
 
 function formatUsd(v: number): string {
@@ -54,7 +56,7 @@ function PositionRow({ position }: { position: Position }) {
   )
 }
 
-function LenderTile({ lender }: { lender: LenderPositions }) {
+function LenderTile({ lender, lenderMeta }: { lender: LenderPositions; lenderMeta?: Record<string, LenderInfo> }) {
   const account = lender.data[0]
   if (!account) return null
 
@@ -69,7 +71,12 @@ function LenderTile({ lender }: { lender: LenderPositions }) {
     <div className="bg-base-300/50 rounded-lg border border-base-300 overflow-hidden">
       {/* Header row */}
       <div className="flex items-center justify-between px-2.5 py-1.5 border-b border-base-300/60">
-        <span className="text-xs font-bold truncate">{lender.lender.replace(/_/g, ' ')}</span>
+        <span className="flex items-center gap-1.5 text-xs font-bold truncate">
+          {lenderMeta?.[lender.lender]?.logoURI && (
+            <img src={lenderMeta[lender.lender].logoURI} alt="" className="w-4 h-4 rounded-full shrink-0" />
+          )}
+          {lenderMeta?.[lender.lender]?.name ?? lender.lender.replace(/_/g, ' ')}
+        </span>
         {health > 0 && (
           <span className={`flex items-center gap-0.5 text-[11px] font-semibold ${healthColor(health)}`}>
             <Shield size={10} />
@@ -104,7 +111,7 @@ function LenderTile({ lender }: { lender: LenderPositions }) {
   )
 }
 
-export function UserPositions({ positions, loading, error }: Props) {
+export function UserPositions({ positions, loading, error, lenderMeta }: Props) {
   const activeLenders = useMemo(
     () => positions.filter(l =>
       l.data.some(d => d.positions.some(p => p.depositsUSD > 0.01 || p.debtUSD > 0.01)),
@@ -141,7 +148,7 @@ export function UserPositions({ positions, loading, error }: Props) {
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
       {activeLenders.map((lender) => (
-        <LenderTile key={`${lender.lender}:${lender.chainId}`} lender={lender} />
+        <LenderTile key={`${lender.lender}:${lender.chainId}`} lender={lender} lenderMeta={lenderMeta} />
       ))}
     </div>
   )

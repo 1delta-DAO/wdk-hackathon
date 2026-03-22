@@ -91,17 +91,17 @@ describe('encodeOrderData', () => {
 describe('encodeExecutionData', () => {
   it('encodes header with zero actions', () => {
     const data = encodeExecutionData([], [])
-    // 1 + 1 + 20 = 22 bytes header
-    expect((data.length - 2) / 2).toBe(22)
-    // numPre=0, numPost=0
-    expect(data.slice(2, 6)).toBe('0000')
+    // 1 + 1 + 1 + 20 = 23 bytes header
+    expect((data.length - 2) / 2).toBe(23)
+    // numPre=0, numPost=0, numAssets=0
+    expect(data.slice(2, 8)).toBe('000000')
   })
 
   it('encodes header with fee recipient', () => {
     const data = encodeExecutionData([], [], USER)
-    expect((data.length - 2) / 2).toBe(22)
-    // fee recipient at bytes 2-22
-    expect(data.slice(6, 46).toLowerCase()).toBe(USER.slice(2).toLowerCase())
+    expect((data.length - 2) / 2).toBe(23)
+    // fee recipient at bytes 3-23
+    expect(data.slice(8, 48).toLowerCase()).toBe(USER.slice(2).toLowerCase())
   })
 
   it('encodes a single pre-action', () => {
@@ -116,11 +116,13 @@ describe('encodeExecutionData', () => {
       proof: [proofSibling],
     }], [])
 
-    // Header (22) + action: 54 + 5 + 2(data) + 1 + 32(proof) = 94
-    expect((data.length - 2) / 2).toBe(22 + 94)
+    // Header (23) + action: 54 + 5 + 2(data) + 1 + 32(proof) = 94
+    expect((data.length - 2) / 2).toBe(23 + 94)
     // numPre=1, numPost=0
     expect(data.slice(2, 4)).toBe('01')
     expect(data.slice(4, 6)).toBe('00')
+    // numAssets=1 (auto-computed from 1 unique asset)
+    expect(data.slice(6, 8)).toBe('01')
   })
 })
 
@@ -135,12 +137,14 @@ describe('encodeFillerCalldata', () => {
       assetIn: WETH,
       assetOut: USDT,
       amountIn: 1000000000000000000n,
+      deltaIdxIn: 0,
+      deltaIdxOut: 1,
       target: POOL,
       calldata: swapCd,
     }])
 
-    // 20 + 20 + 14 + 20 + 2 + 4(calldata) = 80
-    expect((data.length - 2) / 2).toBe(80)
+    // 20 + 20 + 14 + 1 + 1 + 20 + 2 + 4(calldata) = 82
+    expect((data.length - 2) / 2).toBe(82)
   })
 
   it('encodes balance sentinel (amountIn=0)', () => {
@@ -148,6 +152,8 @@ describe('encodeFillerCalldata', () => {
       assetIn: WETH,
       assetOut: USDT,
       amountIn: 0n,
+      deltaIdxIn: 0,
+      deltaIdxOut: 1,
       target: POOL,
       calldata: '0xaa',
     }])

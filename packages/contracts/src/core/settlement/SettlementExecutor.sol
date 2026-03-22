@@ -25,13 +25,13 @@ import {UniversalSettlementLending} from "./lending/UniversalSettlementLending.s
  *    • delta > 0, totalBorrowed > 0 → borrow surplus = fee
  *        Verified: surplus × 1e7 ≤ totalBorrowed × maxFeeBps
  *        Transferred to feeRecipient.
- *    • delta > 0, totalBorrowed == 0 → non-borrow surplus → ignored (stays in contract)
+ *    • delta > 0, totalBorrowed == 0 → non-borrow surplus → revert (UnbalancedSettlement)
  *    • delta < 0                     → deficit → revert (UnbalancedSettlement)
  *    • delta == 0                    → balanced → ok
  *
- *  Non-borrow surpluses are not swept to the user — they stay in the
- *  contract.  The solver should deposit excess into a lender for the
- *  user via post-actions so funds remain in lending protocols.
+ *  Non-borrow surpluses cause a revert — the solver MUST deposit excess
+ *  back into a lender for the user via post-actions so that no tokens
+ *  remain unaccounted for in the contract.
  *
  *  Example with maxFeeBps = 50 000 (0.5%), borrow 1000 USDC:
  *    max fee = 1000 × 50 000 / 1e7 = 5 USDC
@@ -45,7 +45,7 @@ import {UniversalSettlementLending} from "./lending/UniversalSettlementLending.s
  *   [32: merkleRoot][2: settlementDataLength][settlementData]
  *
  * @dev Execution data (solver-provided):
- *   [1: numPre][1: numPost][20: feeRecipient]
+ *   [1: numPre][1: numPost][1: numAssets][20: feeRecipient]
  *   [per action]:
  *       [20: asset][14: amount][20: receiver]          — variable params (54 B)
  *       [1: op][2: lender][2: dataLen][data]           — action config
@@ -305,68 +305,92 @@ abstract contract SettlementExecutor is UniversalSettlementLending {
         bytes memory executionData,
         bytes memory fillerCalldata
     ) internal {
-        bytes32 merkleRoot;
         bytes memory settlementData;
 
-        assembly {
-            let od := add(orderData, 0x20)
-            merkleRoot := mload(od)
-            let sLen := and(0xffff, shr(240, mload(add(od, 32))))
-
-            // Copy settlementData into its own bytes memory
-            let fmp := mload(0x40)
-            settlementData := fmp
-            mstore(fmp, sLen)
-            let src := add(od, 34)
-            let dest := add(fmp, 0x20)
-            for { let j := 0 } lt(j, sLen) { j := add(j, 32) } {
-                mstore(add(dest, j), mload(add(src, j)))
-            }
-            mstore(0x40, add(dest, and(add(sLen, 31), not(31))))
-        }
-
-        uint256 numPre;
-        uint256 numPost;
-        address feeRecipient;
-        uint256 execOffset;
-
-        assembly {
-            let ed := add(executionData, 0x20)
-            numPre := shr(248, mload(ed))
-            numPost := shr(248, mload(add(ed, 1)))
-            feeRecipient := shr(96, mload(add(ed, 2)))
-            // header: 1 + 1 + 20 = 22 bytes
-            execOffset := 22
-        }
-
-        AssetDelta[] memory deltas = new AssetDelta[](numPre + numPost);
+        AssetDelta[] memory deltas;
         uint256 deltaCount;
         uint256 riskyLenderMask;
 
-        // ── Stage 1: pre-actions ──
-        (execOffset, deltaCount, riskyLenderMask) = _executeActions(
-            orderSigner, merkleRoot, executionData, execOffset, numPre, deltas, deltaCount
-        );
-
-        // ── Stage 2: intent (optional conversion) ──
-        deltaCount = _executeIntent(
-            orderSigner, settlementData, fillerCalldata, deltas, deltaCount
-        );
-
+        // ── Stages 1-3: pre-actions, intent, post-actions ──
+        // Scoped to free merkleRoot / numPre / numPost / execOffset from the stack.
         {
-            // ── Stage 3: post-actions ──
-            uint256 postMask;
-            (execOffset, deltaCount, postMask) = _executeActions(
-                orderSigner, merkleRoot, executionData, execOffset, numPost, deltas, deltaCount
+            bytes32 merkleRoot;
+
+            assembly {
+                let od := add(orderData, 0x20)
+                merkleRoot := mload(od)
+                let sLen := and(0xffff, shr(240, mload(add(od, 32))))
+
+                // Copy settlementData into its own bytes memory
+                let fmp := mload(0x40)
+                settlementData := fmp
+                mstore(fmp, sLen)
+                let src := add(od, 34)
+                let dest := add(fmp, 0x20)
+                for { let j := 0 } lt(j, sLen) { j := add(j, 32) } {
+                    mstore(add(dest, j), mload(add(src, j)))
+                }
+                mstore(0x40, add(dest, and(add(sLen, 31), not(31))))
+            }
+
+            uint256 numPre;
+            uint256 numPost;
+            uint256 execOffset;
+
+            assembly {
+                let ed := add(executionData, 0x20)
+                numPre := shr(248, mload(ed))
+                numPost := shr(248, mload(add(ed, 1)))
+                // header: 1 + 1 + 1 + 20 = 23 bytes
+                execOffset := 23
+            }
+
+            // Allocate delta array sized by solver-provided numAssets (byte 2).
+            assembly {
+                let n := shr(248, mload(add(add(executionData, 0x20), 2)))
+                // Manually allocate: length + n * 3 words (asset, delta, totalBorrowed)
+                let fmp := mload(0x40)
+                deltas := fmp
+                mstore(fmp, n)
+                let sz := mul(n, 0x60)
+                // zero-init the array data
+                let start := add(fmp, 0x20)
+                for { let i := 0 } lt(i, sz) { i := add(i, 0x20) } {
+                    mstore(add(start, i), 0)
+                }
+                mstore(0x40, add(start, sz))
+            }
+
+            // ── Stage 1: pre-actions ──
+            (execOffset, deltaCount, riskyLenderMask) = _executeActions(
+                orderSigner, merkleRoot, executionData, execOffset, numPre, deltas, deltaCount
             );
-            riskyLenderMask |= postMask;
+
+            // ── Stage 2: intent (optional conversion) ──
+            deltaCount = _executeIntent(
+                orderSigner, settlementData, fillerCalldata, deltas, deltaCount
+            );
+
+            {
+                // ── Stage 3: post-actions ──
+                uint256 postMask;
+                (execOffset, deltaCount, postMask) = _executeActions(
+                    orderSigner, merkleRoot, executionData, execOffset, numPost, deltas, deltaCount
+                );
+                riskyLenderMask |= postMask;
+            }
         }
 
         // ── Stage 4: sweep borrow fees, verify no deficits ──
-        _sweepAndVerify(deltas, deltaCount, orderSigner, feeRecipient, maxFeeBps);
+        {
+            address feeRecipient;
+            assembly {
+                feeRecipient := shr(96, mload(add(add(executionData, 0x20), 3)))
+            }
+            _sweepAndVerify(deltas, deltaCount, orderSigner, feeRecipient, maxFeeBps);
+        }
 
         // ── Stage 5: post-settlement conditions (health factor, etc.) ──
-        // Run for all lender buckets that were touched by any operation.
         if (riskyLenderMask != 0) {
             _postSettlementCheck(orderSigner, settlementData, riskyLenderMask);
         }
@@ -618,6 +642,38 @@ abstract contract SettlementExecutor is UniversalSettlementLending {
         }
         deltas[count] = AssetDelta(asset, change, borrowAmount);
         return count + 1;
+    }
+
+    /**
+     * @notice Update a delta entry at a solver-specified index (O(1) lookup).
+     * @dev Used by swap conversions where the solver pre-picks the delta slot.
+     *      If the slot is empty (asset == address(0)), initializes it.
+     *      If the slot is occupied, verifies the asset matches.
+     * @param deltas    Pre-allocated delta array.
+     * @param count     Current number of occupied entries.
+     * @param idx       Solver-provided index into the deltas array.
+     * @param asset     Token address to write/verify at the index.
+     * @param change    Signed delta change.
+     * @return newCount Updated count (may increase by 1 if slot was empty).
+     */
+    function _updateDeltaAtIndex(
+        AssetDelta[] memory deltas,
+        uint256 count,
+        uint256 idx,
+        address asset,
+        int256 change
+    ) internal pure returns (uint256 newCount) {
+        if (deltas[idx].asset == asset) {
+            deltas[idx].delta += change;
+            return count;
+        }
+        if (deltas[idx].asset == address(0)) {
+            deltas[idx] = AssetDelta(asset, change, 0);
+            // count tracks the high-water mark — advance if this index extends it
+            return idx >= count ? idx + 1 : count;
+        }
+        // Slot occupied by a different asset — solver provided a wrong index.
+        revert UnbalancedSettlement();
     }
 
     // ── Virtual hooks ───────────────────────────────────────

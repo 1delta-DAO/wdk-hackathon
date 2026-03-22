@@ -56,12 +56,14 @@ describe('Settlement.buildCrossProtocolMigration: Aave wstETH/WETH → Morpho', 
     collateralAsset: WSTETH,
     debtAsset: WETH,
     source: {
-      pool: AAVE_V3_CORE,
-      aToken: A_WSTETH,
-      debtToken: V_DEBT_WETH,
+      protocol: 'aave',
+      pool: { pool: AAVE_V3_CORE, aToken: A_WSTETH, debtToken: V_DEBT_WETH },
     },
-    destMarket: MORPHO_MARKET,
-    morpho: MORPHO_BLUE,
+    dest: {
+      protocol: 'morpho',
+      market: MORPHO_MARKET,
+      morpho: MORPHO_BLUE,
+    },
     user: USER,
     settlement: SETTLEMENT,
     borrowAmount: 10_000_000_000_000_000_001n, // slightly > debt to cover rounding
@@ -103,13 +105,13 @@ describe('Settlement.buildCrossProtocolMigration: Aave wstETH/WETH → Morpho', 
     // Verify executionData is non-trivial
     const edLen = (result.executionData.length - 2) / 2
 
-    // Header (22) + 2 Aave actions + 2 Morpho actions
+    // Header (23) + 2 Aave actions + 2 Morpho actions
     // Aave repay: 54 + 5 + 41(data) + 1 + 2*32(proof) = 165
     // Aave withdraw: 54 + 5 + 40(data) + 1 + 2*32(proof) = 164
     // Morpho deposit: 54 + 5 + 119(data) + 1 + 2*32(proof) = 243
     // Morpho borrow: 54 + 5 + 117(data) + 1 + 2*32(proof) = 241
-    // Total: 22 + 165 + 164 + 243 + 241 = 835
-    expect(edLen).toBe(835)
+    // Total: 23 + 165 + 164 + 243 + 241 = 836
+    expect(edLen).toBe(836)
   })
 
   it('orderData starts with the merkle root', () => {
@@ -123,12 +125,14 @@ describe('Settlement.buildCrossProtocolMigration: with Morpho health factor cond
     collateralAsset: WSTETH,
     debtAsset: WETH,
     source: {
-      pool: AAVE_V3_CORE,
-      aToken: A_WSTETH,
-      debtToken: V_DEBT_WETH,
+      protocol: 'aave',
+      pool: { pool: AAVE_V3_CORE, aToken: A_WSTETH, debtToken: V_DEBT_WETH },
     },
-    destMarket: MORPHO_MARKET,
-    morpho: MORPHO_BLUE,
+    dest: {
+      protocol: 'morpho',
+      market: MORPHO_MARKET,
+      morpho: MORPHO_BLUE,
+    },
     user: USER,
     settlement: SETTLEMENT,
     borrowAmount: 10_000_000_000_000_000_001n,

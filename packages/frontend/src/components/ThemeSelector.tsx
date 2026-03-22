@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { Star, Moon, Zap, Sunset, CloudLightning, Eye, Hexagon, Circle, Activity } from 'react-feather'
+import { Star, Moon, Zap, Sunset, CloudLightning, Eye, Hexagon, Circle, Activity, Sun } from 'react-feather'
 import type { FC } from 'react'
 
 interface ThemeDef {
@@ -13,6 +13,7 @@ const THEMES: ThemeDef[] = [
   { id: 'nebula',    label: 'Nebula',     icon: Star,           custom: true },
   { id: 'deepspace', label: 'Deep Space', icon: Circle,         custom: true },
   { id: 'plasma',    label: 'Plasma',     icon: Activity,       custom: true },
+  { id: 'light',     label: 'Light',      icon: Sun },
   { id: 'night',     label: 'Night',      icon: Moon },
   { id: 'synthwave', label: 'Synthwave',  icon: Zap },
   { id: 'cyberpunk', label: 'Cyberpunk',  icon: Hexagon },

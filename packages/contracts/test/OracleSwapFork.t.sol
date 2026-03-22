@@ -321,6 +321,8 @@ contract OracleSwapSettlementForkTest is Test {
             WETH,                               // assetIn
             USDT,                               // assetOut
             uint112(actualWeth),                // amountIn
+            uint8(0),                           // deltaIdxIn (WETH from pre-action withdraw)
+            uint8(1),                           // deltaIdxOut (USDT for post-action deposit)
             address(swapper),                   // target (mock DEX)
             uint16(swapCalldata.length),        // calldataLen
             swapCalldata                        // DEX calldata
@@ -328,7 +330,7 @@ contract OracleSwapSettlementForkTest is Test {
 
         // ── Build executionData ──
         bytes memory executionData = abi.encodePacked(
-            uint8(1), uint8(1), address(0),     // 1 pre, 1 post, no fee recipient
+            uint8(1), uint8(1), uint8(2), address(0),     // 1 pre, 1 post, 2 assets, no fee recipient
             // Pre: withdraw all WETH from Aave
             _action(WETH, type(uint112).max, address(settlement), 3, 0, withdrawData, pr0),
             // Post: deposit all USDT to Aave for user
@@ -556,7 +558,10 @@ contract OracleSwapSettlementForkTest is Test {
 
             bytes memory swapCalldata = abi.encodeCall(FixedRateSwapper.swap, (WETH, swapAll, WBTC));
             fillerCalldata = abi.encodePacked(
-                WETH, WBTC, uint112(swapAll), address(swapper),
+                WETH, WBTC, uint112(swapAll),
+                uint8(1),                           // deltaIdxIn (WETH, from pre-action withdraw)
+                uint8(2),                           // deltaIdxOut (WBTC, for post-action deposit)
+                address(swapper),
                 uint16(swapCalldata.length), swapCalldata
             );
 
@@ -568,7 +573,7 @@ contract OracleSwapSettlementForkTest is Test {
             //   Post deposit: -Y WBTC (amount=0)       -> delta[WBTC] = 0
             //   Post borrow:  +userDebt USDC           -> delta[USDC] = 0
             executionData = abi.encodePacked(
-                uint8(2), uint8(2), address(0),
+                uint8(2), uint8(2), uint8(3), address(0),
                 _action(USDC, type(uint112).max, user, 2, 0, repayData, pr0),
                 _action(WETH, type(uint112).max, address(settlement), 3, 0, withdrawData, pr1),
                 _action(WBTC, 0, user, 0, 0, depositData, pr2),
@@ -644,7 +649,10 @@ contract OracleSwapSettlementForkTest is Test {
 
         bytes memory swapCalldata = abi.encodeCall(FixedRateSwapper.swap, (WETH, swapAll, USDT));
         fillerCalldata = abi.encodePacked(
-            WETH, USDT, uint112(swapAll), address(swapper),
+            WETH, USDT, uint112(swapAll),
+            uint8(1),                           // deltaIdxIn (WETH, from pre-action withdraw)
+            uint8(2),                           // deltaIdxOut (USDT, for post-action deposit)
+            address(swapper),
             uint16(swapCalldata.length), swapCalldata
         );
 
@@ -656,7 +664,7 @@ contract OracleSwapSettlementForkTest is Test {
         //   Post deposit: -Y USDT (amount=0)       → delta[USDT] = 0
         //   Post borrow:  +userDebt USDC           → delta[USDC] = 0
         executionData = abi.encodePacked(
-            uint8(2), uint8(2), address(0),
+            uint8(2), uint8(2), uint8(3), address(0),
             _action(USDC, type(uint112).max, user, 2, 0, repayData, pr0),
             _action(WETH, type(uint112).max, address(settlement), 3, 0, withdrawData, pr1),
             _action(USDT, 0, user, 0, 0, depositData, pr2),

@@ -159,7 +159,7 @@ contract SettlementDeltaForkTest is Test {
         o.orderData = abi.encodePacked(o.root, uint16(o.settlementPayload.length), o.settlementPayload);
 
         o.executionData = abi.encodePacked(
-            uint8(2), uint8(2), address(0),
+            uint8(2), uint8(2), uint8(2), address(0),
             _action(USDC, type(uint112).max, user, 2, 0, repayData, pr0),
             _action(WETH, type(uint112).max, address(settlement), 3, 0, withdrawData, pr1),
             _action(WETH, 0, user, 0, 0, depositData, pr2),
@@ -386,7 +386,7 @@ contract SettlementDeltaForkTest is Test {
         uint256 excessBorrow = flashLoanAmount + 1_000e6;
 
         bytes memory executionData = abi.encodePacked(
-            uint8(2), uint8(2), address(0),
+            uint8(2), uint8(2), uint8(2), address(0),
             _action(USDC, type(uint112).max, user, 2, 0, repayData, pr0),
             _action(WETH, type(uint112).max, address(settlement), 3, 0, withdrawData, pr1),
             _action(WETH, 0, user, 0, 0, depositData, pr2),
@@ -449,7 +449,7 @@ contract SettlementDeltaForkTest is Test {
         bytes memory orderData = abi.encodePacked(root, uint16(0));
 
         bytes memory executionData = abi.encodePacked(
-            uint8(2), uint8(2), address(0),
+            uint8(2), uint8(2), uint8(2), address(0),
             _action(USDC, type(uint112).max, user, 2, 0, repayData, pr0_bad),
             _action(WETH, type(uint112).max, address(settlement), 3, 0, withdrawData, pr1),
             _action(WETH, 0, user, 0, 0, depositData, pr2),

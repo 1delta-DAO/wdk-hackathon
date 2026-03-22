@@ -40,6 +40,7 @@ import {SettlementForwarder} from "./SettlementForwarder.sol";
  *  fillerCalldata format (solver-provided):
  *    [per conversion]:
  *        [20: assetIn][20: assetOut][14: amountIn]
+ *        [1: deltaIdxIn][1: deltaIdxOut]
  *        [20: target][2: calldataLen][calldataLen: calldata]
  *
  *  amountIn sentinels:
@@ -250,6 +251,8 @@ contract Settlement is
         address fcAssetIn;
         address fcAssetOut;
         uint256 amountIn;
+        uint256 deltaIdxIn;
+        uint256 deltaIdxOut;
         address target;
         uint256 swapCalldataLen;
 
@@ -258,8 +261,10 @@ contract Settlement is
             fcAssetIn := shr(96, mload(fc))
             fcAssetOut := shr(96, mload(add(fc, 20)))
             amountIn := shr(144, mload(add(fc, 40)))
-            target := shr(96, mload(add(fc, 54)))
-            swapCalldataLen := and(0xffff, shr(240, mload(add(fc, 74))))
+            deltaIdxIn := shr(248, mload(add(fc, 54)))
+            deltaIdxOut := shr(248, mload(add(fc, 55)))
+            target := shr(96, mload(add(fc, 56)))
+            swapCalldataLen := and(0xffff, shr(240, mload(add(fc, 76))))
         }
 
         // Verify asset pair matches user-signed config
@@ -281,7 +286,7 @@ contract Settlement is
             // Nothing to swap — skip (delta unchanged)
             if (amountIn == 0) {
                 newDeltaCount = deltaCount;
-                fcConsumed = 76 + swapCalldataLen;
+                fcConsumed = 78 + swapCalldataLen;
                 return (newDeltaCount, fcConsumed);
             }
         }
@@ -292,12 +297,12 @@ contract Settlement is
         // ── Oracle verification ──
         _verifySwapOutput(oracle, fcAssetIn, fcAssetOut, amountIn, amountOut, swapTolerance);
 
-        // ── Update deltas ──
-        newDeltaCount = _updateDelta(deltas, deltaCount, fcAssetIn, -int256(amountIn), 0);
-        newDeltaCount = _updateDelta(deltas, newDeltaCount, fcAssetOut, int256(amountOut), 0);
+        // ── Update deltas via solver-provided indices ──
+        newDeltaCount = _updateDeltaAtIndex(deltas, deltaCount, deltaIdxIn, fcAssetIn, -int256(amountIn));
+        newDeltaCount = _updateDeltaAtIndex(deltas, newDeltaCount, deltaIdxOut, fcAssetOut, int256(amountOut));
 
-        // 20 + 20 + 14 + 20 + 2 + swapCalldataLen = 76 + swapCalldataLen
-        fcConsumed = 76 + swapCalldataLen;
+        // 20 + 20 + 14 + 1 + 1 + 20 + 2 + swapCalldataLen = 78 + swapCalldataLen
+        fcConsumed = 78 + swapCalldataLen;
     }
 
     /**
@@ -343,13 +348,13 @@ contract Settlement is
         // Build swap calldata and execute
         bytes memory swapCalldata = new bytes(swapCalldataLen);
         assembly {
-            let src := add(add(fillerCalldata, 0x20), add(fcOffset, 76))
+            let src := add(add(fillerCalldata, 0x20), add(fcOffset, 78))
             let dest := add(swapCalldata, 0x20)
             for { let j := 0 } lt(j, swapCalldataLen) { j := add(j, 32) } {
                 mstore(add(dest, j), mload(add(src, j)))
             }
         }
-        SettlementForwarder(fwd).execute(target, swapCalldata);
+        SettlementForwarder(fwd).approveAndExecute(assetIn, target, amountIn, target, swapCalldata);
 
         // Sweep output back
         SettlementForwarder(fwd).sweep(assetOut);

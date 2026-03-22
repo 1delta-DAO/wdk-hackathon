@@ -1,6 +1,6 @@
 @import "tailwindcss";
 @plugin "daisyui" {
-  themes: night, synthwave, cyberpunk, dracula, dim, sunset,
+  themes: light, night, synthwave, cyberpunk, dracula, dim, sunset,
     nebula, deepspace, plasma;
 }
 
