@@ -9,7 +9,7 @@ import { fetchOrder, fetchOpenOrders, markOrderFilled, describeLeaves } from './
 import type { MerkleLeaf } from './order.js'
 import { buildSettlementContext } from './context.js'
 import { executeSettlement } from './settle.js'
-import { runPortfolioManagement } from './portfolioAgent.js'
+import { runOrchestrator } from './orchestrator.js'
 import type { Address } from 'viem'
 
 export interface AgentClients {
@@ -235,14 +235,12 @@ export async function runAllSettlements(
 }
 
 /**
- * Full cycle: settle all open orders, then run portfolio management.
+ * Full cycle: orchestrator decides whether to settle, manage portfolio, or skip.
  * This is the recommended entry point for the cron job / server.
  */
 export async function runFullCycle(
-  clients: AgentClients,
   chainId: number,
   forceMigration = false,
 ): Promise<void> {
-  await runAllSettlements(clients, chainId, forceMigration)
-  await runPortfolioManagement(clients.wdkClient, chainId)
+  await runOrchestrator(chainId, forceMigration)
 }
