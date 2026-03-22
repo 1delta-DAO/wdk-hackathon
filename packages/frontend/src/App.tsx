@@ -80,7 +80,7 @@ export default function App() {
   const { lenders: lenderMeta } = useLendingMeta(activeChainId)
 
   const effectiveAccount = observeAddress.match(/^0x[0-9a-fA-F]{40}$/) ? observeAddress : address
-  const { positions, loading: positionsLoading, error: positionsError } = useUserPositions(effectiveAccount, activeChainId)
+  const { positions, loading: positionsLoading, error: positionsError, refetch: refetchPositions } = useUserPositions(effectiveAccount, activeChainId)
 
   const selectedLenders = useMemo(
     () => lenders.filter((l) => selectedLenderIds.has(l.id)),
@@ -229,7 +229,10 @@ export default function App() {
       {/* Navbar */}
       <nav className="navbar bg-base-200 border-b border-base-300 px-3 min-h-0 h-11">
         <div className="navbar-start">
-          <h1 className="text-sm font-bold">1delta Agents Gateway</h1>
+          <div className="flex items-center gap-1.5">
+            <img src="/usdt007.svg" alt="USDT007" className="h-8 w-8" />
+            <h1 className="text-sm font-bold tracking-wider" style={{ fontFamily: "'Orbitron', sans-serif" }}>USDT007 <span className="text-base-content/40 font-medium">— Permission to Fill</span></h1>
+          </div>
         </div>
         <div className="navbar-center">
           <ChainSelector selectedChainId={activeChainId} onSelect={handleChainSelect} />
@@ -279,7 +282,7 @@ export default function App() {
                 )}
               </div>
               {effectiveAccount ? (
-                <UserPositions positions={positions} loading={positionsLoading} error={positionsError} />
+                <UserPositions positions={positions} loading={positionsLoading} error={positionsError} onRefresh={refetchPositions} />
               ) : (
                 <div className="text-base-content/40 text-xs py-3 text-center">
                   Connect wallet or paste an address
@@ -316,6 +319,7 @@ export default function App() {
                           onToggle={(key) => handleToggleTokenPerm(lender.id, key)}
                           onSelectAll={(keys) => handleSelectAllTokenPerms(lender.id, keys)}
                           chainId={activeChainId}
+                          positions={positions}
                         />
                       )
                     })}
@@ -448,10 +452,10 @@ export default function App() {
                   {orderData}
                 </pre>
                 <div className="shrink-0 flex flex-col gap-1">
-                  <button onClick={handleCopyOrderData} className="btn btn-xs btn-outline btn-warning">Copy</button>
+                  <button onClick={handleCopyOrderData} className="btn btn-xs border-none bg-warning/15 text-warning hover:bg-warning/25">Copy</button>
                   <button onClick={handleSubmitOrder}
                     disabled={orderSubmitting || !deployedSettlement || !isConnected}
-                    className="btn btn-xs btn-primary">
+                    className="btn btn-xs btn-primary border-none">
                     {orderSubmitting ? <span className="loading loading-spinner loading-xs" /> : 'Submit'}
                   </button>
                 </div>
@@ -468,7 +472,7 @@ export default function App() {
       </main>
 
       <footer className="border-t border-base-300 px-3 py-2 text-center text-[11px] text-base-content/30">
-        1delta Agents Gateway
+        <span style={{ fontFamily: "'Orbitron', sans-serif" }}>USDT007</span> — Permission to Fill
       </footer>
     </div>
   )

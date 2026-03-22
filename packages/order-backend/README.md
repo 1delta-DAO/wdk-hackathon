@@ -1,6 +1,6 @@
-# Order Backend
+# USDT007 Order Backend
 
-Cloudflare Worker that collects signed migration orders from the frontend and serves them to the AI lending agent.
+Cloudflare Worker that collects signed user intents from the USDT007 frontend and serves them to fill agents.
 
 Uses [Durable Objects](https://developers.cloudflare.com/durable-objects/) to store orders durably, with one object per chain so reads and writes are always consistent within a chain.
 

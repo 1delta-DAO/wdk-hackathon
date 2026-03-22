@@ -10,6 +10,7 @@ build/
 .tmp
 wrangler.toml
 !wrangler.toml.example
+.wrangler/
 
 # Solidity / Foundry / Hardhat
 cache/

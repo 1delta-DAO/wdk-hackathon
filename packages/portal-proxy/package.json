@@ -1,5 +1,5 @@
 {
-  "name": "@wdk-hackathon/portal-proxy",
+  "name": "@usdt007/portal-proxy",
   "version": "0.1.0",
   "description": "Cloudflare Worker proxy for the 1delta portal API (hides API key from frontend)",
   "type": "module",

@@ -1,7 +1,7 @@
 {
-  "name": "@wdk-hackathon/order-backend",
+  "name": "@usdt007/order-backend",
   "version": "0.1.0",
-  "description": "Cloudflare Worker that collects settlement orders from frontends and serves them to AI agents",
+  "description": "Cloudflare Worker that collects user intents from the USDT007 frontend and serves them to fill agents",
   "type": "module",
   "scripts": {
     "dev": "wrangler dev",

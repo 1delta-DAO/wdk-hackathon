@@ -1,6 +1,6 @@
-# 1delta Migration Agent — WDK Hackathon
+# USDT007 — Permission to Fill
 
-An end-to-end DeFi automation stack that lets users permissionlessly migrate their lending positions to better-rate protocols, executed atomically by an AI agent.
+An agentic permission system that allows agents running on the [Tether WDK](https://docs.wallet.tether.io) to fill extended user intents — migrating lending positions to better-rate protocols, executed atomically by an AI agent.
 
 Built for the **WDK Hackathon** — [Tether Wallet Development Kit](https://docs.wallet.tether.io).
 

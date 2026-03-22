@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { PORTAL_PROXY_URL } from '../config/settlements'
 
 // ── Types ────────────────────────────────────────────────────────
@@ -180,6 +180,9 @@ export function useUserPositions(
   const [positions, setPositions] = useState<LenderPositions[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [tick, setTick] = useState(0)
+
+  const refetch = useCallback(() => setTick(t => t + 1), [])
 
   useEffect(() => {
     if (!account || !chainId) {
@@ -240,7 +243,7 @@ export function useUserPositions(
 
     void fetchPositions()
     return () => { cancelled = true }
-  }, [account, chainId])
+  }, [account, chainId, tick])
 
-  return { positions, loading, error }
+  return { positions, loading, error, refetch }
 }

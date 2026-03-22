@@ -4,6 +4,8 @@
  * Routes:
  *   GET  /health              — liveness check
  *   GET  /address             — returns the agent wallet address (public)
+ *   POST /run                 — run the full orchestrator cycle (bearer-protected)
+ *                               body: { chainId?: number (default 42161), forceMigration?: boolean }
  *   POST /settle/all          — run settlement for all open orders (bearer-protected)
  *                               body: { chainId: number, forceMigration?: boolean }
  *   POST /settle/order        — run settlement for one order (bearer-protected)
@@ -91,6 +93,16 @@ export default {
       const forceMigration = body.forceMigration === true
       const results = await runAllSettlements(chainId, forceMigration)
       return Response.json({ results })
+    }
+
+    if (request.method === 'POST' && url.pathname === '/run') {
+      if (!bearerOk(request, env)) return unauthorized()
+      let body: Record<string, unknown> = {}
+      try { body = await request.json() as Record<string, unknown> } catch { /* ok */ }
+      const chainId = Number(body.chainId) || 42161
+      const forceMigration = body.forceMigration === true
+      await runOrchestrator(chainId, forceMigration)
+      return Response.json({ status: 'done', chainId })
     }
 
     if (request.method === 'POST' && url.pathname === '/settle/order') {

@@ -1,8 +1,8 @@
-# Lending Agent
+# USDT007 Lending Agent
 
-An autonomous DeFi agent that settles user loan migrations between lending protocols **and** manages its own treasury — deciding when to act, what to do, and why.
+An autonomous DeFi agent with permission to fill — settles user loan migrations between lending protocols **and** manages its own treasury, deciding when to act, what to do, and why.
 
-Built with OpenAI (GPT-4o), the [WDK](https://github.com/tetherto/wdk-mcp-toolkit) (Tether Wallet Development Kit), and 1delta.
+Built with OpenAI (GPT-4o), the [Tether WDK](https://github.com/tetherto/wdk-mcp-toolkit) (Wallet Development Kit), and 1delta.
 
 ---
 

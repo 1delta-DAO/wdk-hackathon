@@ -1,11 +1,12 @@
 import { useMemo } from 'react'
-import { Shield, TrendingUp, TrendingDown, AlertTriangle } from 'react-feather'
+import { Shield, TrendingUp, TrendingDown, AlertTriangle, RefreshCw } from 'react-feather'
 import type { LenderPositions, Position } from '../hooks/useUserPositions'
 
 interface Props {
   positions: LenderPositions[]
   loading: boolean
   error: string | null
+  onRefresh?: () => void
 }
 
 function formatUsd(v: number): string {
@@ -68,7 +69,7 @@ function LenderTile({ lender }: { lender: LenderPositions }) {
   return (
     <div className="bg-base-300/50 rounded-lg border border-base-300 overflow-hidden">
       {/* Header row */}
-      <div className="flex items-center justify-between px-2.5 py-1.5 border-b border-base-300/60">
+      <div className="flex items-center justify-between gap-2 px-2.5 py-1.5 border-b border-base-300/60">
         <span className="text-xs font-bold truncate">{lender.lender.replace(/_/g, ' ')}</span>
         {health > 0 && (
           <span className={`flex items-center gap-0.5 text-[11px] font-semibold ${healthColor(health)}`}>
@@ -104,7 +105,7 @@ function LenderTile({ lender }: { lender: LenderPositions }) {
   )
 }
 
-export function UserPositions({ positions, loading, error }: Props) {
+export function UserPositions({ positions, loading, error, onRefresh }: Props) {
   const activeLenders = useMemo(
     () => positions.filter(l =>
       l.data.some(d => d.positions.some(p => p.depositsUSD > 0.01 || p.debtUSD > 0.01)),
@@ -112,7 +113,18 @@ export function UserPositions({ positions, loading, error }: Props) {
     [positions],
   )
 
-  if (loading) {
+  const refreshBtn = onRefresh && (
+    <button
+      className="btn btn-ghost btn-xs gap-1"
+      onClick={onRefresh}
+      disabled={loading}
+    >
+      <RefreshCw size={12} className={loading ? 'animate-spin' : ''} />
+      <span className="text-[10px]">Refresh</span>
+    </button>
+  )
+
+  if (loading && activeLenders.length === 0) {
     return (
       <div className="flex items-center gap-2 py-4 justify-center text-base-content/40 text-xs">
         <span className="loading loading-spinner loading-xs" />
@@ -123,9 +135,12 @@ export function UserPositions({ positions, loading, error }: Props) {
 
   if (error) {
     return (
-      <div className="alert alert-error py-1.5 text-xs">
-        <AlertTriangle size={12} />
-        <span>{error}</span>
+      <div className="space-y-2">
+        <div className="alert alert-error py-1.5 text-xs">
+          <AlertTriangle size={12} />
+          <span>{error}</span>
+        </div>
+        {refreshBtn}
       </div>
     )
   }
@@ -139,10 +154,16 @@ export function UserPositions({ positions, loading, error }: Props) {
   }
 
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-      {activeLenders.map((lender) => (
-        <LenderTile key={`${lender.lender}:${lender.chainId}`} lender={lender} />
-      ))}
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <span className="text-[10px] text-base-content/30">{activeLenders.length} lender{activeLenders.length !== 1 ? 's' : ''}</span>
+        {refreshBtn}
+      </div>
+      <div className="inline-flex flex-wrap gap-2">
+        {activeLenders.map((lender) => (
+          <LenderTile key={`${lender.lender}:${lender.chainId}`} lender={lender} />
+        ))}
+      </div>
     </div>
   )
 }

@@ -1,6 +1,6 @@
-# Frontend
+# USDT007 Frontend
 
-React + Wagmi UI for the 1delta migration agent. Lets users connect their wallet, view their active lending positions, and sign migration orders that the AI agent will fill.
+React + Wagmi UI for USDT007 — Permission to Fill. Lets users connect their wallet, view their active lending positions, and grant agents permission to fill extended intents via the Tether WDK.
 
 ---
 

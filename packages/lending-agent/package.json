@@ -1,7 +1,7 @@
 {
-  "name": "@wdk-hackathon/lending-agent",
+  "name": "@usdt007/lending-agent",
   "version": "1.0.0",
-  "description": "AI agent that finds the best lending market via 1delta MCP and executes deposits via WDK MCP",
+  "description": "USDT007 agent that fills extended user intents — finds the best lending market and executes settlements via WDK",
   "type": "module",
   "main": "dist/index.js",
   "scripts": {

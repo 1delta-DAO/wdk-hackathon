@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { Star, Moon, Zap, Sunset, CloudLightning, Eye, Hexagon, Circle, Activity } from 'react-feather'
+import { Star, Moon, Zap, Sunset, CloudLightning, Eye, Hexagon, Circle, Activity, Crosshair } from 'react-feather'
 import type { FC } from 'react'
 
 interface ThemeDef {
@@ -10,6 +10,7 @@ interface ThemeDef {
 }
 
 const THEMES: ThemeDef[] = [
+  { id: 'usdt007',   label: 'USDT007',    icon: Crosshair,      custom: true },
   { id: 'nebula',    label: 'Nebula',     icon: Star,           custom: true },
   { id: 'deepspace', label: 'Deep Space', icon: Circle,         custom: true },
   { id: 'plasma',    label: 'Plasma',     icon: Activity,       custom: true },
@@ -23,7 +24,7 @@ const THEMES: ThemeDef[] = [
 
 export function ThemeSelector() {
   const [theme, setTheme] = useState(() => {
-    return (typeof localStorage !== 'undefined' && localStorage.getItem('theme')) || 'night'
+    return (typeof localStorage !== 'undefined' && localStorage.getItem('theme')) || 'usdt007'
   })
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)

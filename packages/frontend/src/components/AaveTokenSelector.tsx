@@ -1,8 +1,10 @@
 import { useMemo } from 'react'
 import { useReadContracts } from 'wagmi'
 import { erc20Abi } from 'viem'
+import { Crosshair } from 'react-feather'
 import type { AaveTokenPermission } from '../data/lenders'
 import { useTokenList } from '../hooks/useTokenList'
+import type { LenderPositions } from '../hooks/useUserPositions'
 
 /** Token icon using logoURI from the token list API, with fallback to a colored circle */
 function TokenIcon({ logoURI, symbol, size = 18 }: { logoURI?: string; symbol?: string; size?: number }) {
@@ -36,14 +38,45 @@ interface Props {
   onToggle: (key: string) => void
   onSelectAll: (keys: string[]) => void
   chainId: number
+  positions?: LenderPositions[]
 }
 
 export function tokenPermKey(protocolId: string, perm: AaveTokenPermission): string {
   return `${protocolId}:${perm.tokenType}:${perm.tokenAddress}`
 }
 
-export function AaveTokenSelector({ protocolLabel, permissions, selectedKeys, onToggle, onSelectAll, chainId }: Props) {
+export function AaveTokenSelector({ protocolLabel, permissions, selectedKeys, onToggle, onSelectAll, chainId, positions }: Props) {
   const { tokens } = useTokenList(chainId)
+
+  // Derive keys for tokens the user has positions in across ANY lender
+  const positionKeys = useMemo(() => {
+    if (!positions) return []
+
+    // Collect all underlying addresses with deposits or debt across all lenders
+    const depositedUnderlyings = new Set<string>()
+    const debtUnderlyings = new Set<string>()
+    for (const lp of positions) {
+      for (const account of lp.data) {
+        for (const pos of account.positions) {
+          const underlying = pos.underlyingInfo?.asset?.address?.toLowerCase()
+          if (!underlying) continue
+          if (pos.depositsUSD > 0.01) depositedUnderlyings.add(underlying)
+          if (pos.debtUSD > 0.01) debtUnderlyings.add(underlying)
+        }
+      }
+    }
+
+    const keys: string[] = []
+    for (const perm of permissions) {
+      const u = perm.underlying.toLowerCase()
+      if (perm.tokenType === 'aToken' && depositedUnderlyings.has(u)) {
+        keys.push(`${perm.tokenType}:${perm.tokenAddress}`)
+      } else if (perm.tokenType === 'vToken' && debtUnderlyings.has(u)) {
+        keys.push(`${perm.tokenType}:${perm.tokenAddress}`)
+      }
+    }
+    return keys
+  }, [positions, permissions])
 
   const byUnderlying = useMemo(() => {
     const map = new Map<string, AaveTokenPermission[]>()
@@ -90,6 +123,11 @@ export function AaveTokenSelector({ protocolLabel, permissions, selectedKeys, on
         <span className="text-xs font-semibold text-secondary">{protocolLabel}</span>
         <div className="flex items-center gap-1.5">
           <span className="text-[10px] text-base-content/30">{selectedCount}/{permissions.length}</span>
+          {positionKeys.length > 0 && (
+            <button onClick={() => onSelectAll(positionKeys)} className="link link-success text-[10px] no-underline">
+              Positions
+            </button>
+          )}
           <button onClick={() => onSelectAll(allPermKeys)} className="link link-primary text-[10px] no-underline">
             {selectedCount === permissions.length ? 'None' : 'All'}
           </button>
@@ -118,12 +156,11 @@ export function AaveTokenSelector({ protocolLabel, permissions, selectedKeys, on
                   const isCol = perm.tokenType === 'aToken'
                   return (
                     <button key={key} onClick={() => onToggle(key)}
-                      className={`btn btn-xs gap-0.5 h-5 min-h-5 ${
-                        selected ? (isCol ? 'btn-success btn-outline' : 'btn-warning btn-outline') : 'btn-ghost'
+                      className={`btn btn-xs gap-0.5 h-5 min-h-5 border-none items-center justify-center ${
+                        selected ? (isCol ? 'bg-success/15 text-success' : 'bg-warning/15 text-warning') : 'btn-ghost'
                       }`}>
-                      <input type="checkbox" className={`checkbox checkbox-xs ${isCol ? 'checkbox-success' : 'checkbox-warning'}`}
-                        checked={selected} readOnly />
-                      <span className="text-[10px]">{isCol ? 'aToken' : 'vToken'}</span>
+                      <Crosshair size={10} className={`shrink-0 ${selected ? (isCol ? 'text-success' : 'text-warning') : 'text-base-content/20'}`} />
+                      <span className="text-[10px] leading-none">{isCol ? 'aToken' : 'vToken'}</span>
                     </button>
                   )
                 })}

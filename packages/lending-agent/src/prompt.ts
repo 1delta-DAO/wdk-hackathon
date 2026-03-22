@@ -42,11 +42,11 @@ CURRENT PORTFOLIO (chain: ${state.chainId}):
   Total:         ~$${totalUsd.toFixed(2)}
 
 STRATEGY RULES (apply in priority order):
-1. GAS RESERVE — Keep at least $10 worth of ETH (~${ethReserveEth} ETH, covers ~1000 Arbitrum txs).
-   If ETH < $5, swap enough USDT to bring ETH balance up to $10.
+1. GAS RESERVE — Keep at least $0.10 worth of ETH (Arbitrum gas is extremely cheap — ~$0.001 per tx).
+   If ETH < $0.05, swap enough USDT to bring ETH balance up to $0.10.
 2. USDT YIELD — If wallet USDT > $20, deposit the excess above a $10 liquid buffer into Aave V3
    to earn supply APY. Aave USDT on Arbitrum is the primary yield destination.
-3. STAKING YIELD — If ETH > $15 (comfortably above reserve), consider swapping half the excess
+3. STAKING YIELD — If ETH > $1 (comfortably above reserve), consider swapping half the excess
    ETH into wstETH to earn passive Ethereum staking yield.
 4. NO ACTION — If all balances are already healthy, do nothing. Clearly explain why.
 

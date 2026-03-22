@@ -20,8 +20,11 @@ interface Props {
   onRootChange?: (root: Hex | null, leaves?: GeneratedLeaf[]) => void
 }
 
-const OP_BADGE: Record<string, string> = {
-  Deposit: 'badge-success', Borrow: 'badge-warning', Repay: 'badge-info', Withdraw: 'badge-secondary',
+const OP_STYLE: Record<string, string> = {
+  Deposit: 'bg-success/15 text-success',
+  Borrow: 'bg-warning/15 text-warning',
+  Repay: 'bg-info/15 text-info',
+  Withdraw: 'bg-secondary/15 text-secondary',
 }
 
 export function MerklePanel({ chainId, selectedLenders, selectedTokenPerms, morphoMarkets, onRootChange }: Props) {
@@ -127,7 +130,7 @@ export function MerklePanel({ chainId, selectedLenders, selectedTokenPerms, morp
               <div className="divide-y divide-base-300/20">
                 {groupLeaves.map((leaf, i) => (
                   <div key={i} className="flex items-center justify-between px-2 py-0.5">
-                    <span className={`badge badge-xs ${OP_BADGE[leaf.opName]}`}>{leaf.opName}</span>
+                    <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${OP_STYLE[leaf.opName] ?? 'bg-base-300 text-base-content/50'}`}>{leaf.opName}</span>
                     <span className="text-[9px] font-mono text-base-content/20 truncate max-w-20">{leaf.leaf.slice(0, 10)}...</span>
                   </div>
                 ))}
