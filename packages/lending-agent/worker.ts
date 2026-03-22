@@ -2,36 +2,39 @@
  * Cloudflare Worker entry point for the lending-agent settlement service.
  *
  * Routes:
+ *   GET  /health              — liveness check
  *   GET  /address             — returns the agent wallet address (public)
  *   POST /settle/all          — run settlement for all open orders (bearer-protected)
- *                               body: { chainId: number, settlementAddress?: string }
+ *                               body: { chainId: number, forceMigration?: boolean }
+ *   POST /settle/order        — run settlement for one order (bearer-protected)
+ *                               body: { orderId: string, chainId: number, forceMigration?: boolean }
  *
  * Cron trigger (every hour):
- *   Runs the same settlement loop as POST /settle/all for each configured chain.
+ *   Runs the orchestrator loop for each configured chain.
  *
  * Required secrets (set via `wrangler secret put`):
- *   ANTHROPIC_API_KEY   — Claude API key
- *   WDK_MCP_URL         — URL of the WDK HTTP sidecar  (examples/http/index.js)
- *   ORDER_BACKEND_URL   — URL of the order backend
- *   API_SECRET          — bearer token to protect /settle/* endpoints
+ *   OPENAI_API_KEY    — OpenAI API key
+ *   WDK_SEED          — BIP-39 seed phrase for the solver wallet
+ *   ORDER_BACKEND_URL — URL of the order backend
+ *   API_SECRET        — bearer token to protect /settle/* endpoints
  *
  * Optional:
- *   ONEDELTA_API_KEY    — bearer token for 1delta MCP
- *   MODEL               — Claude model override  (default: claude-opus-4-6)
- *   DRY_RUN             — "true" to skip on-chain submission
- *   CRON_CHAIN_IDS      — comma-separated chain IDs for cron runs  (default: "42161")
+ *   ONEDELTA_API_KEY  — bearer token for 1delta MCP
+ *   MODEL             — model override (default: gpt-4o-mini)
+ *   DRY_RUN           — "true" to skip on-chain submission
+ *   CRON_CHAIN_IDS    — comma-separated chain IDs (default: "42161")
  */
 
-import { connectOneDelta, connectWdk, callTool } from './src/mcp.js'
-import { runAllSettlements } from './src/main.js'
+import { runAllSettlements, runSettlementFlow } from './src/main.js'
+import { runOrchestrator } from './src/orchestrator.js'
+import { getWdkAddress } from './src/wdk.js'
+import { RPC_URL_BY_CHAIN } from './src/config.js'
 
 export interface Env {
-  // Secrets
-  ANTHROPIC_API_KEY: string
-  WDK_MCP_URL: string
+  OPENAI_API_KEY: string
+  WDK_SEED: string
   ORDER_BACKEND_URL: string
   API_SECRET: string
-  // Optional
   ONEDELTA_API_KEY?: string
   MODEL?: string
   DRY_RUN?: string
@@ -41,15 +44,12 @@ export interface Env {
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
 function injectEnv (env: Env): void {
-  const vals: Record<string, string> = {
-    ANTHROPIC_API_KEY:  env.ANTHROPIC_API_KEY,
-    WDK_MCP_URL:        env.WDK_MCP_URL,
-    ORDER_BACKEND_URL:  env.ORDER_BACKEND_URL ?? 'http://localhost:8787',
-    ONEDELTA_API_KEY:   env.ONEDELTA_API_KEY ?? '',
-    MODEL:              env.MODEL ?? 'claude-opus-4-6',
-    DRY_RUN:            env.DRY_RUN ?? 'false',
-  }
-  for (const [k, v] of Object.entries(vals)) process.env[k] = v
+  process.env.OPENAI_API_KEY   = env.OPENAI_API_KEY
+  process.env.WDK_SEED         = env.WDK_SEED
+  process.env.ORDER_BACKEND_URL = env.ORDER_BACKEND_URL ?? 'http://localhost:8787'
+  process.env.ONEDELTA_API_KEY = env.ONEDELTA_API_KEY ?? ''
+  process.env.MODEL            = env.MODEL ?? 'gpt-4o-mini'
+  process.env.DRY_RUN          = env.DRY_RUN ?? 'false'
 }
 
 function unauthorized (): Response {
@@ -60,91 +60,65 @@ function unauthorized (): Response {
 }
 
 function bearerOk (request: Request, env: Env): boolean {
-  const auth = request.headers.get('Authorization') ?? ''
+  const auth  = request.headers.get('Authorization') ?? ''
   const token = auth.startsWith('Bearer ') ? auth.slice(7) : ''
   return !!env.API_SECRET && token === env.API_SECRET
-}
-
-async function runSettle (env: Env, chainId: number) {
-  const [oneDeltaClient, wdkClient] = await Promise.all([connectOneDelta(), connectWdk()])
-  try {
-    return await runAllSettlements({ oneDeltaClient, wdkClient }, chainId)
-  } finally {
-    await Promise.allSettled([oneDeltaClient.close(), wdkClient.close()])
-  }
 }
 
 // ── Fetch handler ─────────────────────────────────────────────────────────────
 
 export default {
-  async fetch (request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+  async fetch (request: Request, env: Env, _ctx: ExecutionContext): Promise<Response> {
     injectEnv(env)
-
     const url = new URL(request.url)
-
-    // ── GET /address ──────────────────────────────────────────────────────────
-    // Returns the EVM address that the agent wallet will sign/send from.
-    if (request.method === 'GET' && url.pathname === '/address') {
-      const wdkClient = await connectWdk()
-      try {
-        const address = await callTool(wdkClient, 'getAddress', { chain: 'ethereum' })
-        return Response.json({ address })
-      } finally {
-        await wdkClient.close()
-      }
-    }
-
-    // ── POST /settle/all ──────────────────────────────────────────────────────
-    // Fetches all open orders for the given chainId and runs the settlement
-    // flow on each. Returns an array of { orderId, result } objects.
-    // Protected with Bearer token.
-    if (request.method === 'POST' && url.pathname === '/settle/all') {
-      if (!bearerOk(request, env)) return unauthorized()
-
-      let body: Record<string, unknown> = {}
-      try { body = await request.json() as Record<string, unknown> } catch { /* ok */ }
-
-      const chainId = Number(body.chainId)
-      if (!chainId) return Response.json({ error: 'chainId required' }, { status: 400 })
-
-      const results = await runSettle(env, chainId)
-      return Response.json({ results })
-    }
 
     if (request.method === 'GET' && url.pathname === '/health') {
       return Response.json({ status: 'ok' })
+    }
+
+    if (request.method === 'GET' && url.pathname === '/address') {
+      const rpcUrl = RPC_URL_BY_CHAIN[42161]
+      const address = await getWdkAddress(env.WDK_SEED, rpcUrl)
+      return Response.json({ address })
+    }
+
+    if (request.method === 'POST' && url.pathname === '/settle/all') {
+      if (!bearerOk(request, env)) return unauthorized()
+      let body: Record<string, unknown> = {}
+      try { body = await request.json() as Record<string, unknown> } catch { /* ok */ }
+      const chainId = Number(body.chainId)
+      if (!chainId) return Response.json({ error: 'chainId required' }, { status: 400 })
+      const forceMigration = body.forceMigration === true
+      const results = await runAllSettlements(chainId, forceMigration)
+      return Response.json({ results })
+    }
+
+    if (request.method === 'POST' && url.pathname === '/settle/order') {
+      if (!bearerOk(request, env)) return unauthorized()
+      let body: Record<string, unknown> = {}
+      try { body = await request.json() as Record<string, unknown> } catch { /* ok */ }
+      const orderId = String(body.orderId ?? '')
+      const chainId = Number(body.chainId)
+      if (!orderId) return Response.json({ error: 'orderId required' }, { status: 400 })
+      if (!chainId) return Response.json({ error: 'chainId required' }, { status: 400 })
+      const forceMigration = body.forceMigration === true
+      const result = await runSettlementFlow(orderId, chainId, forceMigration)
+      return Response.json({ orderId, result })
     }
 
     return new Response('Not found', { status: 404 })
   },
 
   // ── Cron handler ─────────────────────────────────────────────────────────────
-  // Triggered every hour by the schedule in wrangler.toml.
-  // Processes all open orders on each configured chain sequentially.
   async scheduled (_event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
     injectEnv(env)
-
     const chainIds = (env.CRON_CHAIN_IDS ?? '42161')
-      .split(',')
-      .map(s => Number(s.trim()))
-      .filter(Boolean)
-
-    console.log(`[cron] Starting hourly settlement run for chains: ${chainIds.join(', ')}`)
+      .split(',').map(s => Number(s.trim())).filter(Boolean)
 
     ctx.waitUntil((async () => {
       for (const chainId of chainIds) {
-        console.log(`[cron] Processing chain ${chainId}…`)
-        try {
-          const results = await runSettle(env, chainId)
-          const settled  = results.filter(r => !r.result.startsWith('ERROR') && r.result !== 'DRY_RUN')
-          const skipped  = results.filter(r => r.result.includes('no action') || r.result.includes('NO MIGRATION'))
-          const errors   = results.filter(r => r.result.startsWith('ERROR'))
-          console.log(`[cron] chain ${chainId}: ${settled.length} settled, ${skipped.length} skipped, ${errors.length} errors`)
-        } catch (err) {
-          console.error(`[cron] chain ${chainId} failed:`, err instanceof Error ? err.message : err)
-        }
+        await runOrchestrator(chainId)
       }
-      console.log('[cron] Hourly settlement run complete.')
     })())
   },
 }
