@@ -285,20 +285,52 @@ function getMarketRates(
 }
 
 // ── Debt amount in base units ─────────────────────────────────────────────────
-// Positions API returns USD values. Compute base units from price + decimals.
 
+// Extended shape of position market entries returned by get_user_positions
+interface PositionMarketFull extends PositionMarket {
+  underlyingInfo?: { asset?: { decimals?: number } }
+}
+
+/**
+ * Extracts the exact debt amount in base units from the position data.
+ *
+ * The API returns `debt` as a token-unit string (e.g. "1.30019") alongside
+ * `underlyingInfo.asset.decimals`, so we can reconstruct the exact base-unit
+ * amount without any USD conversion or RPC calls.
+ *
+ * Falls back to USD-based estimation if the position entry is missing.
+ */
 function resolveDebtBaseUnits(
-  debtUsd: number,
+  sourcePosition: PositionItem,
   debtToken: string,
   sourceProtocol: string,
   markets: MarketEntry[],
 ): string {
+  const dataArr = (sourcePosition.data as Record<string, unknown>[] | undefined) ?? []
+  const accountData = dataArr[0] as Record<string, unknown> | undefined
+  const posMarkets = (accountData?.positions as PositionMarketFull[] | undefined) ?? []
+
+  for (const m of posMarkets) {
+    if (!m.underlying) continue
+    const addr = m.underlying.match(/0x[0-9a-fA-F]{40}/)?.[0]
+    if (!addr || addr.toLowerCase() !== debtToken.toLowerCase()) continue
+
+    const debtStr = String(m.debt ?? '0')
+    const debtAmount = parseFloat(debtStr)
+    if (debtAmount <= 0) continue
+
+    const decimals = m.underlyingInfo?.asset?.decimals
+    if (decimals !== undefined) {
+      return String(Math.round(debtAmount * 10 ** decimals))
+    }
+  }
+
+  // Fallback: derive from USD value via market price
+  const debtUsd = getDebtUsd(sourcePosition)
   const entry = lookupMarketRates(markets, debtToken, sourceProtocol)
   if (entry?.priceUsd && entry?.decimals) {
-    const raw = Math.round((debtUsd / entry.priceUsd) * 10 ** entry.decimals)
-    return String(raw)
+    return String(Math.round((debtUsd / entry.priceUsd) * 10 ** entry.decimals))
   }
-  // Fallback: USD amount scaled to 6 decimals (stablecoin assumption)
   return String(Math.round(debtUsd * 1e6))
 }
 
@@ -345,14 +377,13 @@ export async function buildSettlementContext(
       continue
     }
     const { collateralToken, debtToken } = tokens
-    const debtUsd = getDebtUsd(srcPos)
     const sourceRates = getMarketRates(allMarkets, srcGroup, collateralToken, debtToken, chainId)
     const srcNetYield =
       sourceRates.collateralDepositRate !== null && sourceRates.debtBorrowRate !== null
         ? sourceRates.collateralDepositRate - sourceRates.debtBorrowRate
         : null
     const lender = String(srcPos.lender ?? srcGroup.protocol)
-    const debtAmountBaseUnits = resolveDebtBaseUnits(debtUsd, debtToken, srcGroup.protocol, allMarkets)
+    const debtAmountBaseUnits = resolveDebtBaseUnits(srcPos, debtToken, srcGroup.protocol, allMarkets)
 
     const dests: DestinationInfo[] = []
     for (const g of groups.filter(g => g !== srcGroup && g.depositLeafIndex !== undefined && g.borrowLeafIndex !== undefined)) {
