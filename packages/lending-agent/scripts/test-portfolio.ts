@@ -17,6 +17,12 @@
 
 import { runPortfolioManagement } from '../src/portfolioAgent.js'
 
+// WDK sometimes fires background promise rejections outside the agent's try/catch.
+// Catch them here so the process doesn't crash with an unhandled rejection.
+process.on('unhandledRejection', (reason) => {
+  console.error('[unhandledRejection]', reason instanceof Error ? reason.message : reason)
+})
+
 const CHAIN_ID = 42161 // Arbitrum One
 
 console.log('=== Portfolio Agent Test ===')
