@@ -72,7 +72,6 @@ The portal proxy is a thin Cloudflare Worker that adds the 1delta API key (store
 | [packages/lending-agent](packages/lending-agent/) | AI agent — settlement + autonomous treasury management |
 | [packages/contracts](packages/contracts/) | Solidity — atomic flash-loan migration contracts |
 | [packages/settlement-sdk](packages/settlement-sdk/) | TypeScript SDK — calldata builders, EIP-712 helpers |
-| [packages/wdk-mcp-toolkit](packages/wdk-mcp-toolkit/) | Tether WDK MCP server (upstream, vendored) |
 
 ---
 
