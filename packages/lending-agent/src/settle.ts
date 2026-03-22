@@ -328,9 +328,9 @@ export async function buildSettlementTx(input: SettlementInput, rpcUrl?: string)
     [
       // Pre 1: repay existing debt on source protocol
       {
-        asset: input.debtAsset,
+        asset: input.debtAsset as Hex,
         amount: AmountSentinel.MAX,
-        receiver: input.user,
+        receiver: input.user as Hex,
         op: LenderOps.REPAY,
         lender: input.sourceRepayLeaf.lender,
         data: input.sourceRepayLeaf.data,
@@ -338,9 +338,9 @@ export async function buildSettlementTx(input: SettlementInput, rpcUrl?: string)
       },
       // Pre 2: withdraw collateral from source protocol → settlement contract
       {
-        asset: input.collateralAsset,
+        asset: input.collateralAsset as Hex,
         amount: AmountSentinel.MAX,
-        receiver: input.settlement,
+        receiver: input.settlement as Hex,
         op: LenderOps.WITHDRAW,
         lender: input.sourceWithdrawLeaf.lender,
         data: input.sourceWithdrawLeaf.data,
@@ -350,9 +350,9 @@ export async function buildSettlementTx(input: SettlementInput, rpcUrl?: string)
     [
       // Post 1: deposit collateral on dest protocol for user
       {
-        asset: input.collateralAsset,
+        asset: input.collateralAsset as Hex,
         amount: AmountSentinel.BALANCE,
-        receiver: input.user,
+        receiver: input.user as Hex,
         op: LenderOps.DEPOSIT,
         lender: input.destDepositLeaf.lender,
         data: input.destDepositLeaf.data,
@@ -360,16 +360,16 @@ export async function buildSettlementTx(input: SettlementInput, rpcUrl?: string)
       },
       // Post 2: borrow on dest protocol → settlement contract (repays flash loan)
       {
-        asset: input.debtAsset,
+        asset: input.debtAsset as Hex,
         amount: borrowAmount,
-        receiver: input.settlement,
+        receiver: input.settlement as Hex,
         op: LenderOps.BORROW,
         lender: input.destBorrowLeaf.lender,
         data: input.destBorrowLeaf.data,
         proof: proofFor(input.destBorrowLeaf),
       },
     ],
-    input.feeRecipient,
+    input.feeRecipient as Hex | undefined,
   )
 
   const settlementCall = encodeFunctionData({
