@@ -82,7 +82,15 @@ export async function runSettlementFlow(
   }
 
   // ── Flat option list (one entry per source→dest pair) ────
-  const flatOptions = buildFlatOptions(ctx)
+  // Filter to only options with a strictly positive improvement — no point migrating otherwise
+  const flatOptions = buildFlatOptions(ctx).filter(
+    o => o.destination.improvement !== null && o.destination.improvement > 0,
+  )
+
+  if (flatOptions.length === 0) {
+    console.log('No migration options with positive improvement — skipping order.')
+    return 'SKIPPED_NO_IMPROVEMENT'
+  }
 
   // ── propose_migration local tool ─────────────────────────
   interface MigrationDecision {
