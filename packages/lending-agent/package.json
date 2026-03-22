@@ -11,8 +11,7 @@
     "worker:dev": "wrangler dev worker.ts",
     "worker:deploy": "wrangler deploy worker.ts",
     "worker:tail": "wrangler tail",
-    "test": "vitest run",
-    "test:watch": "vitest"
+    "test": "vitest run"
   },
   "dependencies": {
     "@1delta/settlement-sdk": "workspace:*",
