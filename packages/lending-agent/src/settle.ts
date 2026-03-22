@@ -401,7 +401,10 @@ export async function buildSettlementTx(input: SettlementInput, rpcUrl?: string)
   const tokenApprovals: Hex[] = [
     approve(input.debtAsset,       repaySpender,      maxUint256),
     approve(input.collateralAsset, depositSpender,    maxUint256),
-    approve(input.debtAsset,       input.morphoPool,  flashAmount),
+    // maxUint256 here avoids the case where repaySpender === morphoPool (same Morpho Blue contract):
+    // a flashAmount approval would overwrite the maxUint256 above, leaving insufficient allowance
+    // after the repay step consumes most of it before the flash loan repayment runs.
+    approve(input.debtAsset,       input.morphoPool,  maxUint256),
   ]
 
   const allCalls = [...permitCalls, ...tokenApprovals, settlementCall]
