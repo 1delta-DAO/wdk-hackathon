@@ -15,7 +15,7 @@ import type { Address } from 'viem'
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { callToolRaw } from './mcp.js'
 import type { LeafDescription, StoredOrder } from './order.js'
-import { cometToLender } from './config.js'
+import { cometToLender, ONEDELTA_PORTAL_URL, ONEDELTA_PORTAL_API_KEY } from './config.js'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -88,9 +88,9 @@ export function groupLeaves(leaves: LeafDescription[]): LeafGroup[] {
       extra.comet = leaf.comet
     } else if (leaf.loanToken && leaf.collateralToken) {
       marketKey = `${leaf.protocol}:${leaf.loanToken}:${leaf.collateralToken}`
-      extra.loanToken      = leaf.loanToken
+      extra.loanToken       = leaf.loanToken
       extra.collateralToken = leaf.collateralToken
-      extra.lltv           = leaf.lltv
+      extra.lltv            = leaf.lltv
     } else if (leaf.pool) {
       marketKey = `${leaf.protocol}:${leaf.pool}`
       extra.pool = leaf.pool
@@ -103,7 +103,10 @@ export function groupLeaves(leaves: LeafDescription[]): LeafGroup[] {
     }
 
     const g = groups.get(marketKey)!
-    if (leaf.op === 'REPAY')    { g.repayLeafIndex    = leaf.index; if (leaf.debtToken) g.aaveDebtToken = leaf.debtToken }
+    // For pool-based protocols, there may be multiple REPAY/WITHDRAW leaves at the same pool.
+    // We store the last-seen indices here as defaults; buildSettlementContext will correct them
+    // for pool-based groups using the wrapper-token → underlying map from the portal API.
+    if (leaf.op === 'REPAY')    { g.repayLeafIndex    = leaf.index; if (leaf.vToken) g.aaveDebtToken = leaf.vToken }
     if (leaf.op === 'WITHDRAW') { g.withdrawLeafIndex = leaf.index; if (leaf.aToken)    g.aToken        = leaf.aToken    }
     if (leaf.op === 'DEPOSIT')  g.depositLeafIndex  = leaf.index
     if (leaf.op === 'BORROW')   g.borrowLeafIndex   = leaf.index
@@ -204,7 +207,7 @@ function resolveUnderlying(
   return { collateralToken, debtToken }
 }
 
-// ── Market data ───────────────────────────────────────────────────────────────
+// ── Market data (portal API) ───────────────────────────────────────────────────
 
 interface MarketEntry {
   marketUid?: string   // e.g. "AAVE_V3:42161:0x..." — lender is the first colon-separated segment
@@ -216,18 +219,72 @@ interface MarketEntry {
   decimals?: number
 }
 
-/** Fetch all lending markets for a chain in a single call and index by (lender-prefix, tokenAddress). */
-async function fetchAllMarkets(
-  chainId: number,
-  oneDeltaClient: Client,
-): Promise<MarketEntry[]> {
+/**
+ * Fetches all lending markets from the portal API in a single call.
+ * Returns both the flat market entries (for rate lookups) and a wrapper-token → underlying
+ * address map (for resolving which aToken/vToken leaf corresponds to which underlying asset).
+ */
+async function fetchAllMarkets(chainId: number): Promise<{
+  markets: MarketEntry[]
+  wrapperMap: Map<string, string>
+}> {
+  const markets: MarketEntry[] = []
+  const wrapperMap = new Map<string, string>()
+
   try {
-    const raw = await callToolRaw(oneDeltaClient, 'get_lending_markets', { chainId: String(chainId), count: 500 })
-    const parsed = JSON.parse(raw).markets
-    return (parsed ?? []) as MarketEntry[]
+    const url = `${ONEDELTA_PORTAL_URL}/v1/data/lending/latest?chainIds=${chainId}`
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+    if (ONEDELTA_PORTAL_API_KEY) headers['x-api-key'] = ONEDELTA_PORTAL_API_KEY
+
+    const res = await fetch(url, { headers })
+    if (!res.ok) return { markets, wrapperMap }
+
+    const body = await res.json() as { data?: { items?: unknown[] } }
+    const items = (body?.data?.items ?? []) as Record<string, unknown>[]
+
+    for (const item of items) {
+      const lenderKey = String(item.lenderKey ?? '')
+      const rawMarkets = (item.markets as Record<string, unknown>[] | undefined) ?? []
+
+      for (const m of rawMarkets) {
+        const underlyingInfo = m.underlyingInfo as Record<string, unknown> | undefined
+        const asset = underlyingInfo?.asset as Record<string, unknown> | undefined
+        const underlyingAddr = asset?.address as string | undefined
+        if (!underlyingAddr) continue
+
+        const u = underlyingAddr.toLowerCase()
+
+        // Build MarketEntry for rate lookups
+        const prices = underlyingInfo?.prices as Record<string, unknown> | undefined
+        markets.push({
+          marketUid:             m.marketUid as string | undefined,
+          tokenAddress:          underlyingAddr,
+          depositRate:           m.depositRate as number | undefined,
+          variableBorrowRate:    m.variableBorrowRate as number | undefined,
+          availableLiquidityUsd: (m.withdrawLiquidity ?? m.totalLiquidityUsd) as number | undefined,
+          priceUsd:              prices?.priceUsd as number | undefined,
+          decimals:              asset?.decimals as number | undefined,
+        })
+
+        // Build wrapper token → underlying map
+        const metadata = (m.params as Record<string, unknown> | undefined)?.metadata as Record<string, string> | undefined
+        if (metadata) {
+          for (const key of ['aToken', 'vToken', 'sToken'] as const) {
+            const addr = metadata[key]
+            if (addr && addr !== '0x0000000000000000000000000000000000000000') {
+              wrapperMap.set(addr.toLowerCase(), u)
+            }
+          }
+        }
+      }
+
+      void lenderKey // referenced to avoid unused-var lint on future use
+    }
   } catch {
-    return []
+    // Non-fatal — rates will be null, leaf indices fall back to groupLeaves defaults
   }
+
+  return { markets, wrapperMap }
 }
 
 function lookupMarketRates(
@@ -362,10 +419,10 @@ export async function buildSettlementContext(
     return null
   }
 
-  // ── Fetch all markets once ────────────────────────────────
+  // ── Fetch all markets + wrapper token map ────────────────
   console.log('  Fetching all lending markets…')
-  const allMarkets = await fetchAllMarkets(chainId, oneDeltaClient)
-  console.log(`  Loaded ${allMarkets.length} market entries`)
+  const { markets: allMarkets, wrapperMap } = await fetchAllMarkets(chainId)
+  console.log(`  Loaded ${allMarkets.length} market entries, ${wrapperMap.size} wrapper token mappings`)
 
   // ── Build options for all source candidates ───────────────
   const options: MigrationOption[] = []
@@ -377,6 +434,30 @@ export async function buildSettlementContext(
       continue
     }
     const { collateralToken, debtToken } = tokens
+
+    // For pool-based protocols (Aave), the order may contain multiple REPAY/WITHDRAW leaves
+    // at the same pool for different assets. Use the wrapper token map to find the correct
+    // leaf — the one whose wrapped token resolves to the user's actual debt/collateral underlying.
+    if (srcGroup.pool && wrapperMap.size > 0) {
+      const poolNorm = srcGroup.pool.toLowerCase()
+      const debtNorm = debtToken.toLowerCase()
+      const collNorm = collateralToken.toLowerCase()
+
+      const repayMatch = leafDescriptions.find(l =>
+        l.op === 'REPAY' && l.pool?.toLowerCase() === poolNorm && l.vToken &&
+        wrapperMap.get(l.vToken.toLowerCase()) === debtNorm,
+      )
+      const withdrawMatch = leafDescriptions.find(l =>
+        l.op === 'WITHDRAW' && l.pool?.toLowerCase() === poolNorm && l.aToken &&
+        wrapperMap.get(l.aToken.toLowerCase()) === collNorm,
+      )
+
+      if (repayMatch)    { srcGroup.repayLeafIndex    = repayMatch.index;    srcGroup.aaveDebtToken = repayMatch.vToken }
+      if (withdrawMatch) { srcGroup.withdrawLeafIndex = withdrawMatch.index; srcGroup.aToken        = withdrawMatch.aToken }
+
+      console.log(`  Resolved pool leaves: repay[${repayMatch?.index ?? 'no match'}] withdraw[${withdrawMatch?.index ?? 'no match'}]`)
+    }
+
     const sourceRates = getMarketRates(allMarkets, srcGroup, collateralToken, debtToken, chainId)
     const srcNetYield =
       sourceRates.collateralDepositRate !== null && sourceRates.debtBorrowRate !== null

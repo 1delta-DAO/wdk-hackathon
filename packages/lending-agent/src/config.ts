@@ -1,4 +1,6 @@
 export const ONEDELTA_MCP_URL = 'https://mcp-prototype.1delta.io/mcp'
+export const ONEDELTA_PORTAL_URL = 'https://portal.1delta.io'
+export const ONEDELTA_PORTAL_API_KEY: string = process.env.ONEDELTA_API_KEY ?? ''
 
 export const CHAIN_FILTER: string = process.env.CHAIN_FILTER ?? ''
 export const DRY_RUN: boolean = process.env.DRY_RUN === 'true'
