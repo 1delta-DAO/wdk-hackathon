@@ -466,8 +466,19 @@ export async function buildSettlementContext(
     const lender = String(srcPos.lender ?? srcGroup.protocol)
     const debtAmountBaseUnits = resolveDebtBaseUnits(srcPos, debtToken, srcGroup.protocol, allMarkets)
 
+    const debtNormalized = debtToken.toLowerCase()
+    const collNormalized = collateralToken.toLowerCase()
+
     const dests: DestinationInfo[] = []
-    for (const g of groups.filter(g => g !== srcGroup && g.depositLeafIndex !== undefined && g.borrowLeafIndex !== undefined)) {
+    for (const g of groups.filter(g => {
+      if (g === srcGroup || g.depositLeafIndex === undefined || g.borrowLeafIndex === undefined) return false
+      // For Morpho Blue the leaf encodes exact tokens — filter directly rather than relying on market lookup
+      if (g.loanToken && g.collateralToken) {
+        return g.loanToken.toLowerCase() === debtNormalized &&
+               g.collateralToken.toLowerCase() === collNormalized
+      }
+      return true
+    })) {
       const rates = getMarketRates(allMarkets, g, collateralToken, debtToken, chainId)
       if (rates.collateralDepositRate !== null || rates.debtBorrowRate !== null) {
         const netYield =
