@@ -3,11 +3,11 @@
  *
  * Decodes merkle leaves to extract:
  *   - Which lenders the user approved (numeric ID → 1delta string)
- *   - Pool / aToken / debtToken addresses (Aave)
+ *   - Pool / aToken / vToken addresses (Aave)
  *   - Market params (Morpho)
  *
  * Token addresses for find_market come from get_user_positions, not leaves.
- * Leaves give us the protocol-level addresses (pool, aToken, debtToken) needed
+ * Leaves give us the protocol-level addresses (pool, aToken, vToken) needed
  * to build migration calldata with the settlement-sdk.
  */
 
@@ -89,7 +89,7 @@ function addrAt(data: Hex, byteOffset: number): Address {
 
 interface DecodedAaveDeposit  { pool: Address }
 interface DecodedAaveBorrow   { mode: number; pool: Address }
-interface DecodedAaveRepay    { mode: number; debtToken: Address; pool: Address }
+interface DecodedAaveRepay    { mode: number; vToken: Address; pool: Address }
 interface DecodedAaveWithdraw { aToken: Address; pool: Address }
 
 interface DecodedMorphoAction {
@@ -116,13 +116,13 @@ function decodeAaveBorrow(data: Hex): DecodedAaveBorrow {
   }
 }
 
-// REPAY: [1: mode][20: debtToken][20: pool]
+// REPAY: [1: mode][20: vToken][20: pool]
 function decodeAaveRepay(data: Hex): DecodedAaveRepay {
   const raw = data.slice(2)
   return {
-    mode:      parseInt(raw.slice(0, 2), 16),
-    debtToken: getAddress(`0x${raw.slice(2, 42)}`),
-    pool:      getAddress(`0x${raw.slice(42, 82)}`),
+    mode:   parseInt(raw.slice(0, 2), 16),
+    vToken: getAddress(`0x${raw.slice(2, 42)}`),
+    pool:   getAddress(`0x${raw.slice(42, 82)}`),
   }
 }
 
@@ -163,7 +163,7 @@ export interface LeafDescription {
   // Aave fields
   pool?: string
   aToken?: string
-  debtToken?: string
+  vToken?: string
   // Compound V3 fields
   comet?: string
   // Morpho fields
@@ -194,7 +194,7 @@ export function describeLeaves(leaves: MerkleLeaf[]): LeafDescription[] {
       }
       if (leaf.op === 2 /* REPAY */) {
         const d = decodeAaveRepay(leaf.data)
-        return { ...base, debtToken: d.debtToken, pool: d.pool }
+        return { ...base, vToken: d.vToken, pool: d.pool }
       }
       if (leaf.op === 3 /* WITHDRAW */) {
         const d = decodeAaveWithdraw(leaf.data)
