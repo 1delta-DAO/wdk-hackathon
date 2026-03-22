@@ -11,14 +11,14 @@
     "worker:dev": "wrangler dev worker.ts",
     "worker:deploy": "wrangler deploy worker.ts",
     "worker:tail": "wrangler tail",
-    "wdk:http": "node ../wdk-mcp-toolkit/examples/http/index.js",
     "test": "vitest run",
     "test:watch": "vitest"
   },
   "dependencies": {
     "@1delta/settlement-sdk": "workspace:*",
     "@anthropic-ai/sdk": "^0.78.0",
-    "@modelcontextprotocol/sdk": "^1.23.0",
+    "@tetherto/wdk-protocol-lending-aave-evm": "1.0.0-beta.3",
+    "@tetherto/wdk-protocol-swap-velora-evm": "1.0.0-beta.4",
     "@tetherto/wdk-wallet-evm": "1.0.0-beta.8",
     "openai": "^6.32.0",
     "viem": "^2.47.5"

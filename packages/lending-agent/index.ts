@@ -17,8 +17,9 @@
  */
 
 import { createServer, IncomingMessage, ServerResponse } from 'node:http'
-import { connectOneDelta, connectWdk, callTool } from './src/mcp.js'
 import { runAllSettlements, runSettlementFlow } from './src/main.js'
+import { getWdkAddress } from './src/wdk.js'
+import { RPC_URL_BY_CHAIN } from './src/config.js'
 
 const PORT = Number(process.env.PORT ?? 3000)
 const API_SECRET = process.env.API_SECRET ?? ''
@@ -52,17 +53,6 @@ async function readBody (req: IncomingMessage): Promise<Record<string, unknown>>
   })
 }
 
-// ── Settlement helpers ────────────────────────────────────────────────────────
-
-async function withClients<T> (fn: (clients: { oneDeltaClient: Awaited<ReturnType<typeof connectOneDelta>>, wdkClient: Awaited<ReturnType<typeof connectWdk>> }) => Promise<T>): Promise<T> {
-  const [oneDeltaClient, wdkClient] = await Promise.all([connectOneDelta(), connectWdk()])
-  try {
-    return await fn({ oneDeltaClient, wdkClient })
-  } finally {
-    await Promise.allSettled([oneDeltaClient.close(), wdkClient.close()])
-  }
-}
-
 // ── HTTP server ───────────────────────────────────────────────────────────────
 
 const server = createServer(async (req, res) => {
@@ -75,13 +65,9 @@ const server = createServer(async (req, res) => {
 
   // GET /address
   if (req.method === 'GET' && url.pathname === '/address') {
-    const wdkClient = await connectWdk()
-    try {
-      const address = await callTool(wdkClient, 'getAddress', { chain: 'ethereum' })
-      return json(res, 200, { address })
-    } finally {
-      await wdkClient.close()
-    }
+    const rpcUrl = RPC_URL_BY_CHAIN[42161]
+    const address = await getWdkAddress(process.env.WDK_SEED ?? '', rpcUrl)
+    return json(res, 200, { address })
   }
 
   // POST /settle/all  (Bearer-protected)
@@ -97,7 +83,7 @@ const server = createServer(async (req, res) => {
     if (!chainId) return json(res, 400, { error: 'chainId required' })
     const forceMigration = body.forceMigration === true
 
-    const results = await withClients(clients => runAllSettlements(clients, chainId, forceMigration))
+    const results = await runAllSettlements(chainId, forceMigration)
     return json(res, 200, { results })
   }
 
@@ -116,7 +102,7 @@ const server = createServer(async (req, res) => {
     if (!chainId) return json(res, 400, { error: 'chainId required' })
     const forceMigration = body.forceMigration === true
 
-    const result = await withClients(clients => runSettlementFlow(clients, orderId, chainId, forceMigration))
+    const result = await runSettlementFlow(orderId, chainId, forceMigration)
     return json(res, 200, { orderId, result })
   }
 
@@ -134,7 +120,7 @@ async function cronJob () {
   for (const chainId of CRON_CHAIN_IDS) {
     console.log(`[cron] Processing chain ${chainId}…`)
     try {
-      const results = await withClients(clients => runAllSettlements(clients, chainId))
+      const results = await runAllSettlements(chainId)
       const settled = results.filter((r: { result: string }) => !r.result.startsWith('ERROR') && r.result !== 'DRY_RUN')
       const skipped = results.filter((r: { result: string }) => r.result.includes('no action') || r.result.includes('NO MIGRATION'))
       const errors  = results.filter((r: { result: string }) => r.result.startsWith('ERROR'))

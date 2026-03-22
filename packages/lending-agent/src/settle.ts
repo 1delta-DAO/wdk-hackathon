@@ -8,6 +8,7 @@
 
 import { encodeFunctionData, createPublicClient, http, parseAbi, maxUint256 } from 'viem'
 import type { Hex, Address } from 'viem'
+import { sendTransaction } from './wdk.js'
 import {
   encodeExecutionData,
   AmountSentinel,
@@ -15,9 +16,7 @@ import {
   settleWithFlashLoanAbi,
   buildMerkleTree,
 } from '@1delta/settlement-sdk'
-import type { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import type { MerkleLeaf, SignedPermit, StoredOrder } from './order.js'
-import { callTool } from './mcp.js'
 import { DRY_RUN, ECONOMIC_MODE, RPC_URL_BY_CHAIN, CONTRACTS_BY_CHAIN } from './config.js'
 
 // Morpho Blue flash loan pool — chain-specific, looked up from CONTRACTS_BY_CHAIN
@@ -328,9 +327,9 @@ export async function buildSettlementTx(input: SettlementInput, rpcUrl?: string)
     [
       // Pre 1: repay existing debt on source protocol
       {
-        asset: input.debtAsset,
+        asset: input.debtAsset as Hex,
         amount: AmountSentinel.MAX,
-        receiver: input.user,
+        receiver: input.user as Hex,
         op: LenderOps.REPAY,
         lender: input.sourceRepayLeaf.lender,
         data: input.sourceRepayLeaf.data,
@@ -338,9 +337,9 @@ export async function buildSettlementTx(input: SettlementInput, rpcUrl?: string)
       },
       // Pre 2: withdraw collateral from source protocol → settlement contract
       {
-        asset: input.collateralAsset,
+        asset: input.collateralAsset as Hex,
         amount: AmountSentinel.MAX,
-        receiver: input.settlement,
+        receiver: input.settlement as Hex,
         op: LenderOps.WITHDRAW,
         lender: input.sourceWithdrawLeaf.lender,
         data: input.sourceWithdrawLeaf.data,
@@ -350,9 +349,9 @@ export async function buildSettlementTx(input: SettlementInput, rpcUrl?: string)
     [
       // Post 1: deposit collateral on dest protocol for user
       {
-        asset: input.collateralAsset,
+        asset: input.collateralAsset as Hex,
         amount: AmountSentinel.BALANCE,
-        receiver: input.user,
+        receiver: input.user as Hex,
         op: LenderOps.DEPOSIT,
         lender: input.destDepositLeaf.lender,
         data: input.destDepositLeaf.data,
@@ -360,16 +359,16 @@ export async function buildSettlementTx(input: SettlementInput, rpcUrl?: string)
       },
       // Post 2: borrow on dest protocol → settlement contract (repays flash loan)
       {
-        asset: input.debtAsset,
+        asset: input.debtAsset as Hex,
         amount: borrowAmount,
-        receiver: input.settlement,
+        receiver: input.settlement as Hex,
         op: LenderOps.BORROW,
         lender: input.destBorrowLeaf.lender,
         data: input.destBorrowLeaf.data,
         proof: proofFor(input.destBorrowLeaf),
       },
     ],
-    input.feeRecipient,
+    input.feeRecipient as Hex | undefined,
   )
 
   const settlementCall = encodeFunctionData({
@@ -455,7 +454,6 @@ export async function buildSettlementTx(input: SettlementInput, rpcUrl?: string)
  * is enabled and the estimated gas cost exceeds the solver fee.
  */
 export async function executeSettlement(
-  wdkClient: Client,
   input: SettlementInput,
 ): Promise<string> {
   const rpcUrl = RPC_URL_BY_CHAIN[input.order.order.chainId]
@@ -509,12 +507,7 @@ export async function executeSettlement(
   const seed = process.env.WDK_SEED
   if (!seed) throw new Error('WDK_SEED env var is required for transaction signing')
 
-  // Dynamic import keeps the CommonJS WDK wallet out of the Cloudflare Workers bundle path
-  const WalletManagerEvm = (await import('@tetherto/wdk-wallet-evm')).default
-  const wallet = new WalletManagerEvm(seed, { provider: rpcUrl })
-  const account = await wallet.getAccount(0)
-
-  const { hash } = await account.sendTransaction({ to: tx.to, data: tx.data, value: 0n })
+  const hash = await sendTransaction(seed, rpcUrl, tx.to, tx.data)
   console.log('  tx hash:', hash)
   return hash
 }

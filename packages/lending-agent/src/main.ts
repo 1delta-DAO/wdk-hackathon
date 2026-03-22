@@ -1,21 +1,16 @@
 import { CONTRACTS_BY_CHAIN } from './config.js'
-import { callTool, createRouter } from './mcp.js'
+import { createRouter } from './mcp.js'
 import type { LocalHandler } from './mcp.js'
 import type { GenericTool } from './providers/index.js'
-import type { Client } from '@modelcontextprotocol/sdk/client/index.js'
+import { mnemonicToAccount } from 'viem/accounts'
 import { buildSettlementSystemPrompt, buildFlatOptions } from './prompt.js'
 import { runAgentLoop } from './agent.js'
 import { fetchOrder, fetchOpenOrders, markOrderFilled, describeLeaves } from './order.js'
 import type { MerkleLeaf } from './order.js'
 import { buildSettlementContext } from './context.js'
 import { executeSettlement } from './settle.js'
-import { runPortfolioManagement } from './portfolioAgent.js'
+import { runOrchestrator } from './orchestrator.js'
 import type { Address } from 'viem'
-
-export interface AgentClients {
-  oneDeltaClient: Client
-  wdkClient: Client
-}
 
 /**
  * Full settlement flow:
@@ -26,12 +21,10 @@ export interface AgentClients {
  *   5. TypeScript builds executionData and submits via WDK
  */
 export async function runSettlementFlow(
-  clients: AgentClients,
   orderId: string,
   chainId: number,
   forceMigration = false,
 ): Promise<string> {
-  const { oneDeltaClient, wdkClient } = clients
   const chainContracts = CONTRACTS_BY_CHAIN[chainId]
   const settlement = chainContracts.settlement
   const morphoPool = chainContracts.morphoPool
@@ -66,7 +59,7 @@ export async function runSettlementFlow(
 
   // ── Pre-process: build settlement context ────────────────
   console.log('\nBuilding settlement context…')
-  const ctx = await buildSettlementContext(order, chainId, leafDescriptions, oneDeltaClient)
+  const ctx = await buildSettlementContext(order, chainId, leafDescriptions)
 
   if (!ctx) {
     console.log('No viable settlement context — skipping order.')
@@ -81,12 +74,12 @@ export async function runSettlementFlow(
   // ── Wallet address ───────────────────────────────────────
   let walletAddress = ''
   try {
-    const raw = await callTool(wdkClient, 'getAddress', { chain: 'ethereum' })
-    // WDK may return "Address: 0x..." — extract the raw hex address
-    const match = raw.match(/0x[0-9a-fA-F]{40}/)
-    walletAddress = match ? match[0] : raw
+    const seed = process.env.WDK_SEED
+    if (seed) {
+      walletAddress = mnemonicToAccount(seed).address
+    }
   } catch (err) {
-    console.warn('Could not fetch wallet address:', err instanceof Error ? err.message : err)
+    console.warn('Could not derive wallet address:', err instanceof Error ? err.message : err)
   }
 
   // ── Flat option list (one entry per source→dest pair) ────
@@ -179,7 +172,7 @@ export async function runSettlementFlow(
   console.log(`  destDeposit   [${d.destDepositLeafIndex}]: lender=${dstDepositLeaf?.lender}  proofLen=${dstDepositLeaf?.proof?.length ?? 0}  data=${String(dstDepositLeaf?.data).slice(0, 20)}…`)
   console.log(`  destBorrow    [${d.destBorrowLeafIndex}]: lender=${dstBorrowLeaf?.lender}  proofLen=${dstBorrowLeaf?.proof?.length ?? 0}  data=${String(dstBorrowLeaf?.data).slice(0, 20)}…`)
 
-  const txHash = await executeSettlement(wdkClient, {
+  const txHash = await executeSettlement({
     order,
     sourceRepayLeaf:   srcRepayLeaf,
     sourceWithdrawLeaf: srcWithdrawLeaf,
@@ -209,7 +202,6 @@ export async function runSettlementFlow(
  * Failed orders are logged and skipped — processing continues.
  */
 export async function runAllSettlements(
-  clients: AgentClients,
   chainId: number,
   forceMigration = false,
 ): Promise<{ orderId: string; result: string }[]> {
@@ -222,7 +214,7 @@ export async function runAllSettlements(
   for (const order of orders) {
     console.log(`\n─── Processing order ${order.id} ───`)
     try {
-      const result = await runSettlementFlow(clients, order.id, chainId, forceMigration)
+      const result = await runSettlementFlow(order.id, chainId, forceMigration)
       results.push({ orderId: order.id, result })
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
@@ -235,14 +227,12 @@ export async function runAllSettlements(
 }
 
 /**
- * Full cycle: settle all open orders, then run portfolio management.
+ * Full cycle: orchestrator decides whether to settle, manage portfolio, or skip.
  * This is the recommended entry point for the cron job / server.
  */
 export async function runFullCycle(
-  clients: AgentClients,
   chainId: number,
   forceMigration = false,
 ): Promise<void> {
-  await runAllSettlements(clients, chainId, forceMigration)
-  await runPortfolioManagement(clients.wdkClient, chainId)
+  await runOrchestrator(chainId, forceMigration)
 }
