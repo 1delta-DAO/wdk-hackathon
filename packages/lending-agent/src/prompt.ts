@@ -1,4 +1,4 @@
-import { DRY_RUN } from './config.js'
+import { isDryRun } from './config.js'
 import type { SettlementContext, SourceInfo, DestinationInfo } from './context.js'
 
 // ── Portfolio agent ────────────────────────────────────────────────────────────
@@ -21,7 +21,7 @@ export function buildPortfolioSystemPrompt(state: PortfolioState): string {
   const totalUsd = state.ethUsd + state.usdtUsd + state.wstethUsd + state.aaveUsdtUsd
   const ethReserveEth = state.ethPriceUsd > 0 ? (10 / state.ethPriceUsd).toFixed(4) : '?'
 
-  const dryRunNote = DRY_RUN
+  const dryRunNote = isDryRun()
     ? '\nDRY RUN MODE: Do NOT execute any swap or lend actions. Only call record_actions to describe what you would do, then explain your reasoning.'
     : ''
 
@@ -80,7 +80,7 @@ export function buildSettlementSystemPrompt(
   ctx: SettlementContext,
   flat: FlatOption[],
 ): string {
-  const dryRunNote = DRY_RUN
+  const dryRunNote = isDryRun()
     ? '\nDRY RUN MODE: Do NOT call propose_migration. Only report what you would do.'
     : ''
 

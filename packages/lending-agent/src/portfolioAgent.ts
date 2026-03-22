@@ -17,7 +17,7 @@ import type { GenericTool } from './providers/index.js'
 import { runAgentLoop } from './agent.js'
 import { buildPortfolioSystemPrompt } from './prompt.js'
 import type { PortfolioState } from './prompt.js'
-import { DRY_RUN, RPC_URL_BY_CHAIN, CONTRACTS_BY_CHAIN } from './config.js'
+import { isDryRun, RPC_URL_BY_CHAIN, CONTRACTS_BY_CHAIN } from './config.js'
 import { getWdkAddress, swapTokens, aaveSupply, aaveWithdraw } from './wdk.js'
 
 // ── Token addresses (Arbitrum One) ────────────────────────────────────────────
@@ -174,7 +174,7 @@ export async function runPortfolioManagement(chainId: number): Promise<void> {
     const amountInUsdt = Number(input.amountInUsdt)
     const amountIn     = parseUnits(String(amountInUsdt), 6) // USDT has 6 decimals
 
-    if (DRY_RUN) {
+    if (isDryRun()) {
       console.log(`  [DRY RUN] swap(${tokenIn} → ${tokenOut}, ${amountInUsdt} USDT)`)
       return '[DRY RUN] swap not executed.'
     }
@@ -190,7 +190,7 @@ export async function runPortfolioManagement(chainId: number): Promise<void> {
     const amountUsdt = Number(input.amountUsdt)
     const amount     = parseUnits(String(amountUsdt), 6)
 
-    if (DRY_RUN) {
+    if (isDryRun()) {
       console.log(`  [DRY RUN] aave_supply(USDT, ${amountUsdt})`)
       return '[DRY RUN] aave_supply not executed.'
     }
@@ -206,7 +206,7 @@ export async function runPortfolioManagement(chainId: number): Promise<void> {
     const amountUsdt = Number(input.amountUsdt)
     const amount     = parseUnits(String(amountUsdt), 6)
 
-    if (DRY_RUN) {
+    if (isDryRun()) {
       console.log(`  [DRY RUN] aave_withdraw(USDT, ${amountUsdt})`)
       return '[DRY RUN] aave_withdraw not executed.'
     }

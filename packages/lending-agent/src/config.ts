@@ -1,15 +1,13 @@
-export const ONEDELTA_MCP_URL = 'https://mcp-prototype.1delta.io/mcp'
 export const ONEDELTA_PORTAL_URL = 'https://portal.1delta.io'
-export const ONEDELTA_PORTAL_API_KEY: string = process.env.ONEDELTA_API_KEY ?? ''
+export function getOneDeltaApiKey(): string { return process.env.ONEDELTA_API_KEY ?? '' }
 
-export const CHAIN_FILTER: string = process.env.CHAIN_FILTER ?? ''
-export const DRY_RUN: boolean = process.env.DRY_RUN === 'true'
+export function isDryRun(): boolean { return process.env.DRY_RUN === 'true' }
 
 /**
  * When true, the agent skips settlements where estimated gas cost exceeds
  * the solver fee allowed by the order's maxFeeBps. Disable with ECONOMIC_MODE=false.
  */
-export const ECONOMIC_MODE: boolean = process.env.ECONOMIC_MODE !== 'false'
+export function isEconomicMode(): boolean { return process.env.ECONOMIC_MODE !== 'false' }
 
 // Cap tool results to keep context window manageable
 export const RESULT_CHAR_LIMIT = 20000

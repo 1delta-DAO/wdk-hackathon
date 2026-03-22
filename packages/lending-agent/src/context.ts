@@ -13,7 +13,7 @@
 
 import type { Address } from 'viem'
 import type { LeafDescription, StoredOrder } from './order.js'
-import { cometToLender, ONEDELTA_PORTAL_URL, ONEDELTA_PORTAL_API_KEY } from './config.js'
+import { cometToLender, ONEDELTA_PORTAL_URL, getOneDeltaApiKey } from './config.js'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -121,7 +121,8 @@ async function fetchAllPositions(
 ): Promise<PositionItem[]> {
   const url = `${ONEDELTA_PORTAL_URL}/v1/data/lending/user-positions?account=${signer}&chains=${chainId}`
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
-  if (ONEDELTA_PORTAL_API_KEY) headers['Authorization'] = `Bearer ${ONEDELTA_PORTAL_API_KEY}`
+  const apiKey = getOneDeltaApiKey()
+  if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`
   const res = await fetch(url, { headers })
   if (!res.ok) throw new Error(`1delta positions API error ${res.status}: ${await res.text()}`)
   const parsed = await res.json() as { data?: { items?: PositionItem[] } }
@@ -232,7 +233,8 @@ async function fetchAllMarkets(chainId: number): Promise<{
   try {
     const url = `${ONEDELTA_PORTAL_URL}/v1/data/lending/latest?chainIds=${chainId}`
     const headers: Record<string, string> = { 'Content-Type': 'application/json' }
-    if (ONEDELTA_PORTAL_API_KEY) headers['x-api-key'] = ONEDELTA_PORTAL_API_KEY
+    const apiKey = getOneDeltaApiKey()
+    if (apiKey) headers['x-api-key'] = apiKey
 
     const res = await fetch(url, { headers })
     if (!res.ok) return { markets, wrapperMap }

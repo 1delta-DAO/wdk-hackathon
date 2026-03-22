@@ -17,7 +17,7 @@ import {
   buildMerkleTree,
 } from '@1delta/settlement-sdk'
 import type { MerkleLeaf, SignedPermit, StoredOrder } from './order.js'
-import { DRY_RUN, ECONOMIC_MODE, RPC_URL_BY_CHAIN, CONTRACTS_BY_CHAIN } from './config.js'
+import { isDryRun, isEconomicMode, RPC_URL_BY_CHAIN, CONTRACTS_BY_CHAIN } from './config.js'
 
 // Morpho Blue flash loan pool — chain-specific, looked up from CONTRACTS_BY_CHAIN
 
@@ -473,7 +473,7 @@ export async function executeSettlement(
   console.log(`  calldata:      ${tx.data}`)
   console.log(`  from (solver): ${input.feeRecipient ?? input.user}`)
 
-  if (ECONOMIC_MODE) {
+  if (isEconomicMode()) {
     const chainContracts = CONTRACTS_BY_CHAIN[input.order.order.chainId]
     const fromAddress = input.feeRecipient ?? input.user
     console.log('\n[Economic check] Estimating gas vs solver fee…')
@@ -498,7 +498,7 @@ export async function executeSettlement(
     }
   }
 
-  if (DRY_RUN) {
+  if (isDryRun()) {
     console.log('\n[DRY RUN] Not submitting. Calldata:')
     console.log(tx.data.slice(0, 200) + '…')
     return 'DRY_RUN'

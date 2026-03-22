@@ -221,10 +221,12 @@ export function describeLeaves(leaves: MerkleLeaf[]): LeafDescription[] {
 
 // ─── Backend client ───────────────────────────────────────────────────────────
 
-const ORDER_BACKEND_URL = process.env.ORDER_BACKEND_URL ?? 'http://localhost:8787'
+function getOrderBackendUrl(): string {
+  return process.env.ORDER_BACKEND_URL ?? 'http://localhost:8787'
+}
 
 export async function fetchOpenOrders(chainId: number, signer?: Address): Promise<StoredOrder[]> {
-  const url = new URL(`${ORDER_BACKEND_URL}/v1/orders`)
+  const url = new URL(`${getOrderBackendUrl()}/v1/orders`)
   url.searchParams.set('chainId', String(chainId))
   url.searchParams.set('status', 'open')
   if (signer) url.searchParams.set('signer', signer)
@@ -237,7 +239,7 @@ export async function fetchOpenOrders(chainId: number, signer?: Address): Promis
 }
 
 export async function fetchOrder(id: string, chainId: number): Promise<StoredOrder> {
-  const url = new URL(`${ORDER_BACKEND_URL}/v1/orders/${id}`)
+  const url = new URL(`${getOrderBackendUrl()}/v1/orders/${id}`)
   url.searchParams.set('chainId', String(chainId))
 
   const res = await fetch(url.toString())
@@ -247,7 +249,7 @@ export async function fetchOrder(id: string, chainId: number): Promise<StoredOrd
 }
 
 export async function markOrderFilled(id: string, chainId: number): Promise<void> {
-  const url = new URL(`${ORDER_BACKEND_URL}/v1/orders/${id}`)
+  const url = new URL(`${getOrderBackendUrl()}/v1/orders/${id}`)
   url.searchParams.set('chainId', String(chainId))
 
   const res = await fetch(url.toString(), {
