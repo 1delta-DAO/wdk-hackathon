@@ -1,9 +1,11 @@
 import type { LenderProtocol } from '../data/lenders'
+import type { LenderInfo } from '../hooks/useLendingMeta'
 
 interface Props {
   lenders: LenderProtocol[]
   selectedLenders: Set<string>
   onToggle: (lenderId: string) => void
+  lenderMeta?: Record<string, LenderInfo>
 }
 
 const FAMILY_BADGE: Record<string, string> = {
@@ -18,7 +20,7 @@ const FAMILY_LABEL: Record<string, string> = {
   MORPHO_BLUE: 'Morpho',
 }
 
-export function LenderList({ lenders, selectedLenders, onToggle }: Props) {
+export function LenderList({ lenders, selectedLenders, onToggle, lenderMeta }: Props) {
   if (lenders.length === 0) {
     return <div className="text-base-content/40 text-xs py-3 text-center">No lenders on this chain</div>
   }
@@ -53,6 +55,9 @@ export function LenderList({ lenders, selectedLenders, onToggle }: Props) {
                     checked={selected}
                     onChange={() => onToggle(lender.id)}
                   />
+                  {lenderMeta?.[lender.id]?.logoURI && (
+                    <img src={lenderMeta[lender.id].logoURI} alt="" className="w-4 h-4 rounded-full shrink-0" />
+                  )}
                   <span className="text-xs font-medium flex-1">{lender.label}</span>
                   <span className={`badge badge-xs ${FAMILY_BADGE[lender.family]}`}>
                     {family === 'AAVE' ? 'A' : family === 'COMPOUND_V3' ? 'C3' : 'M'}
