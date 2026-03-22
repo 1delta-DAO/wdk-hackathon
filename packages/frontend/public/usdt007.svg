@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <clipPath id="circCrop">
+      <circle cx="256" cy="256" r="250"/>
+    </clipPath>
+    <clipPath id="barrel">
+      <circle cx="256" cy="256" r="238"/>
+    </clipPath>
+    <radialGradient id="silver" cx="40%" cy="35%" r="65%">
+      <stop offset="0%" stop-color="#e8e8ee"/>
+      <stop offset="40%" stop-color="#c8c8d0"/>
+      <stop offset="100%" stop-color="#a0a0ac"/>
+    </radialGradient>
+  </defs>
+
+  <g clip-path="url(#circCrop)">
+
+    <rect width="512" height="512" fill="url(#silver)"/>
+    <circle cx="256" cy="256" r="238" fill="url(#silver)"/>
+
+    <!-- 7 iris blades (recomputed for inner radius 140) -->
+    <g clip-path="url(#barrel)" fill="#1a1a1a">
+      <path d="M256.0,18.0 A238,238 0 0,1 380.4,53.1 Q366.1,121.3 336.4,181.0 A110,110 0 0,0 318.1,165.2 Q307.4,89.8 256.0,18.0 Z"/>
+      <path d="M442.1,107.6 A238,238 0 0,1 492.2,226.8 Q430.0,258.1 364.8,272.1 A110,110 0 0,0 365.7,248.0 Q418.0,192.6 442.1,107.6 Z"/>
+      <path d="M488.0,309.0 A238,238 0 0,1 426.1,422.4 Q362.9,393.3 311.3,351.1 A110,110 0 0,0 330.7,336.8 Q406.6,343.1 488.0,309.0 Z"/>
+      <path d="M359.3,470.4 A238,238 0 0,1 232.0,492.8 Q215.3,425.2 216.1,358.5 A110,110 0 0,0 239.4,364.7 Q281.8,428.1 359.3,470.4 Z"/>
+      <path d="M152.7,470.4 A238,238 0 0,1 55.9,384.8 Q98.4,329.6 151.0,288.7 A110,110 0 0,0 160.6,310.8 Q137.5,383.5 152.7,470.4 Z"/>
+      <path d="M24.0,309.0 A238,238 0 0,1 30.5,179.9 Q100.1,178.7 164.9,194.3 A110,110 0 0,0 153.7,215.6 Q82.5,242.9 24.0,309.0 Z"/>
+      <path d="M69.9,107.6 A238,238 0 0,1 174.9,32.2 Q219.3,85.9 247.5,146.3 A110,110 0 0,0 223.7,150.8 Q158.1,112.2 69.9,107.6 Z"/>
+    </g>
+
+    <circle cx="256" cy="256" r="238" fill="none" stroke="#1a1a1a" stroke-width="8"/>
+
+    <!-- Larger inner bore -->
+    <circle cx="256" cy="256" r="140" fill="#26A17B"/>
+    <circle cx="256" cy="256" r="140" fill="none" stroke="#1a1a1a" stroke-width="4.5"/>
+
+    <!-- Scaled-up T -->
+    <g transform="translate(256,256)">
+      <rect x="-66" y="-64" width="132" height="20" rx="2.5" fill="white"/>
+      <rect x="-14" y="-64" width="28" height="122" rx="2.5" fill="white"/>
+      <path d="M64,-14 A64,23 0 0,1 -64,-14" fill="none" stroke="white" stroke-width="10"/>
+      <rect x="-14" y="-37" width="28" height="46" fill="white"/>
+      <path d="M-64,-14 A64,23 0 0,1 64,-14" fill="none" stroke="white" stroke-width="10"/>
+    </g>
+
+  </g>
+
+  <circle cx="256" cy="256" r="250" fill="none" stroke="#1a1a1a" stroke-width="4"/>
+</svg>

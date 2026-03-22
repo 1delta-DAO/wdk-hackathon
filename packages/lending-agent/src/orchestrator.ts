@@ -76,8 +76,8 @@ async function fetchOrchestratorState(chainId: number): Promise<OrchestratorStat
 // ── System prompt ─────────────────────────────────────────────────────────────
 
 function buildOrchestratorPrompt(s: OrchestratorState): string {
-  const ethStatus = s.ethUsd < 5
-    ? `⚠️  CRITICAL — below $5 minimum ($${s.ethUsd.toFixed(2)})`
+  const ethStatus = s.ethUsd < 0.05
+    ? `⚠️  CRITICAL — below $0.05 minimum ($${s.ethUsd.toFixed(2)})`
     : `✅  healthy ($${s.ethUsd.toFixed(2)})`
 
   return `You are the orchestrator for an autonomous DeFi agent on Arbitrum.
@@ -99,8 +99,8 @@ AVAILABLE ACTIONS:
   skip_cycle       — Take no action. Use only when everything is healthy and no orders are pending.
 
 DECISION RULES (apply in order):
-1. ETH < $5 AND USDT available → run_portfolio FIRST (swap USDT→ETH), THEN run_settlements
-2. Pending orders > 0 AND ETH ≥ $5 → run_settlements
+1. ETH < $0.05 AND USDT available → run_portfolio FIRST (swap USDT→ETH), THEN run_settlements
+2. Pending orders > 0 AND ETH ≥ $0.05 → run_settlements
 3. Pending orders = 0 AND (USDT > $20 OR ETH imbalanced) → run_portfolio
 4. Everything healthy, no orders → skip_cycle
 

@@ -1,5 +1,6 @@
 import type { Address } from 'viem'
 import { Check } from 'react-feather'
+import { Reticle } from './icons/Reticle'
 import type { LenderProtocol } from '../data/lenders'
 import {
   PERMISSION_DEFS,
@@ -97,7 +98,7 @@ export function PermissionPanel({
       <div className="flex items-center justify-between mb-1.5">
         <span className="text-[11px] text-base-content/40">{signedCount}/{rows.length} signed</span>
         {signedCount < rows.length && (
-          <button onClick={onSignAll} disabled={!!signing} className="btn btn-xs btn-primary">Sign All</button>
+          <button onClick={onSignAll} disabled={!!signing} className="btn btn-xs btn-primary border-none">Sign All</button>
         )}
       </div>
 
@@ -109,18 +110,21 @@ export function PermissionPanel({
           const isSigning = signing === row.key
           return (
             <div key={row.key}
-              className={`flex items-center justify-between gap-1.5 px-2 py-1 rounded text-xs transition-all ${
-                signed ? 'bg-success/5 border border-success/20' : 'bg-base-300/50'
+              className={`flex items-center justify-between gap-1.5 px-2 py-1.5 rounded text-xs transition-all ${
+                signed ? 'bg-success/10' : 'bg-base-300/50'
               }`}>
-              <div className="min-w-0">
-                <div className="text-xs font-medium truncate">{row.label}</div>
-                <div className="text-[10px] text-base-content/30">{row.description}</div>
+              <div className="flex items-center gap-1.5 min-w-0">
+                <Reticle size={12} className={signed ? 'text-success shrink-0' : 'text-base-content/20 shrink-0'} />
+                <div className="min-w-0">
+                  <div className="text-xs font-medium truncate">{row.label}</div>
+                  <div className="text-[10px] text-base-content/30">{row.description}</div>
+                </div>
               </div>
               {signed ? (
-                <span className="badge badge-success badge-xs gap-0.5"><Check size={8} />ok</span>
+                <span className="flex items-center gap-0.5 text-[10px] text-success font-medium"><Check size={10} />Signed</span>
               ) : (
                 <button onClick={() => onSign({ kind: row.kind, label: row.key, targetAddress: row.targetAddress, chainId: row.chainId })}
-                  disabled={isSigning} className="btn btn-xs btn-primary h-5 min-h-5">
+                  disabled={isSigning} className="btn btn-xs btn-primary border-none h-5 min-h-5">
                   {isSigning ? <span className="loading loading-spinner loading-xs" /> : 'Sign'}
                 </button>
               )}

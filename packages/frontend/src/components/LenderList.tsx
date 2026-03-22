@@ -1,3 +1,4 @@
+import { Crosshair } from 'react-feather'
 import type { LenderProtocol } from '../data/lenders'
 import type { LenderInfo } from '../hooks/useLendingMeta'
 
@@ -8,16 +9,17 @@ interface Props {
   lenderMeta?: Record<string, LenderInfo>
 }
 
-const FAMILY_BADGE: Record<string, string> = {
-  AAVE: 'badge-secondary',
-  COMPOUND_V3: 'badge-accent',
-  MORPHO_BLUE: 'badge-info',
-}
-
 const FAMILY_LABEL: Record<string, string> = {
   AAVE: 'Aave',
   COMPOUND_V3: 'Compound V3',
   MORPHO_BLUE: 'Morpho',
+}
+
+function formatTvl(usd: number): string {
+  if (usd >= 1_000_000_000) return `$${(usd / 1_000_000_000).toFixed(1)}B`
+  if (usd >= 1_000_000) return `$${(usd / 1_000_000).toFixed(1)}M`
+  if (usd >= 1_000) return `$${(usd / 1_000).toFixed(0)}K`
+  return `$${usd.toFixed(0)}`
 }
 
 export function LenderList({ lenders, selectedLenders, onToggle, lenderMeta }: Props) {
@@ -43,26 +45,22 @@ export function LenderList({ lenders, selectedLenders, onToggle, lenderMeta }: P
             {protocols.map((lender) => {
               const selected = selectedLenders.has(lender.id)
               return (
-                <label
+                <div
                   key={lender.id}
+                  onClick={() => onToggle(lender.id)}
                   className={`flex items-center gap-1.5 px-2 py-1 rounded cursor-pointer transition-colors ${
                     selected ? 'bg-primary/10' : 'hover:bg-base-300'
                   }`}
                 >
-                  <input
-                    type="checkbox"
-                    className="checkbox checkbox-primary checkbox-xs"
-                    checked={selected}
-                    onChange={() => onToggle(lender.id)}
-                  />
+                  <Crosshair size={12} className={selected ? 'text-primary' : 'text-base-content/20'} />
                   {lenderMeta?.[lender.id]?.logoURI && (
                     <img src={lenderMeta[lender.id].logoURI} alt="" className="w-4 h-4 rounded-full shrink-0" />
                   )}
                   <span className="text-xs font-medium flex-1">{lender.label}</span>
-                  <span className={`badge badge-xs ${FAMILY_BADGE[lender.family]}`}>
-                    {family === 'AAVE' ? 'A' : family === 'COMPOUND_V3' ? 'C3' : 'M'}
-                  </span>
-                </label>
+                  {lenderMeta?.[lender.id]?.tvlUsd != null && lenderMeta[lender.id].tvlUsd! > 0 && (
+                    <span className="text-[10px] text-base-content/30">{formatTvl(lenderMeta[lender.id].tvlUsd!)}</span>
+                  )}
+                </div>
               )
             })}
           </div>

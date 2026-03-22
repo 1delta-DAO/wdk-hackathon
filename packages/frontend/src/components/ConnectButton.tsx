@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { useAccount, useConnect, useDisconnect, useBalance } from 'wagmi'
-import { LogOut, ChevronRight, Briefcase, Copy, Check, X } from 'react-feather'
+import { LogOut, ChevronRight, Copy, Check, X } from 'react-feather'
+import { Reticle } from './icons/Reticle'
 
 /** Well-known wallet connector icons (base64 SVG or emoji fallback) */
 function ConnectorIcon({ name }: { name: string }) {
@@ -23,7 +24,7 @@ function ConnectorIcon({ name }: { name: string }) {
     )
   }
   // Generic wallet icon fallback
-  return <Briefcase size={20} className="text-base-content/60" />
+  return <Reticle size={20} className="text-base-content/60" />
 }
 
 export function ConnectButton() {
@@ -70,17 +71,17 @@ export function ConnectButton() {
       {isConnected && address ? (
         <button
           onClick={() => setOpen(true)}
-          className="btn btn-sm btn-ghost gap-1.5 font-mono text-xs"
+          className="btn btn-sm border-none bg-success/10 text-success hover:bg-success/20 gap-1.5 font-mono text-xs"
         >
-          <span className="w-2 h-2 rounded-full bg-success inline-block" />
+          <Reticle size={12} />
           {address.slice(0, 6)}...{address.slice(-4)}
         </button>
       ) : (
         <button
           onClick={() => setOpen(true)}
-          className="btn btn-sm btn-primary gap-1.5"
+          className="btn btn-sm btn-primary border-none gap-1.5"
         >
-          <Briefcase size={14} />
+          <Reticle size={14} />
           Connect
         </button>
       )}
@@ -99,8 +100,8 @@ export function ConnectButton() {
       >
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-base-300">
-          <h2 className="text-sm font-bold">
-            {isConnected ? 'Briefcase' : 'Connect Briefcase'}
+          <h2 className="text-sm font-bold tracking-wide" style={{ fontFamily: "'Orbitron', sans-serif" }}>
+            {isConnected ? 'Agent' : 'Connect'}
           </h2>
           <button
             onClick={() => setOpen(false)}
@@ -117,8 +118,8 @@ export function ConnectButton() {
               {/* Account card */}
               <div className="bg-base-300/60 rounded-lg p-3 space-y-2.5">
                 <div className="flex items-center gap-2">
-                  <div className="w-8 h-8 rounded-full bg-gradient-to-br from-primary to-secondary flex items-center justify-center">
-                    <Briefcase size={14} className="text-primary-content" />
+                  <div className="w-8 h-8 rounded-full bg-primary/15 flex items-center justify-center">
+                    <Reticle size={14} className="text-primary" />
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="font-mono text-xs truncate">{address}</div>
@@ -145,7 +146,7 @@ export function ConnectButton() {
               {/* Disconnect */}
               <button
                 onClick={() => { disconnect(); setOpen(false) }}
-                className="btn btn-sm btn-outline btn-error w-full gap-1.5"
+                className="btn btn-sm border-none bg-error/10 text-error hover:bg-error/20 w-full gap-1.5"
               >
                 <LogOut size={14} />
                 Disconnect
@@ -165,7 +166,7 @@ export function ConnectButton() {
                     setOpen(false)
                   }}
                   disabled={isPending}
-                  className="btn btn-ghost w-full justify-between h-auto py-3 px-3 border border-base-300 hover:border-primary/40"
+                  className="btn btn-ghost w-full justify-between h-auto py-3 px-3 border-none bg-base-300/50 hover:bg-primary/10"
                 >
                   <div className="flex items-center gap-3">
                     <ConnectorIcon name={connector.name} />

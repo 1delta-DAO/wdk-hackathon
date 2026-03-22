@@ -12,7 +12,7 @@ export function ChainSelector({ selectedChainId, onSelect }: Props) {
         <button
           key={chain.id}
           onClick={() => onSelect(chain.id)}
-          className={`btn btn-xs ${
+          className={`btn btn-xs border-none ${
             selectedChainId === chain.id ? 'btn-primary' : 'btn-ghost'
           }`}
         >

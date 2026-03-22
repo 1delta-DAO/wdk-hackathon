@@ -5,11 +5,13 @@ export interface LenderInfo {
   key: string
   name: string
   logoURI?: string
+  tvlUsd?: number
 }
 
 interface LatestItem {
   lenderKey: string
-  lenderInfo: LenderInfo
+  lenderInfo: { key: string; name: string; logoURI?: string }
+  tvlUsd?: number
 }
 
 interface LatestResponse {
@@ -54,8 +56,11 @@ export function useLendingMeta(chainId: number | null) {
 
         const map: Record<string, LenderInfo> = {}
         for (const item of json.data.items) {
-          if (item.lenderInfo && !map[item.lenderKey]) {
-            map[item.lenderKey] = item.lenderInfo
+          if (!item.lenderInfo) continue
+          if (!map[item.lenderKey]) {
+            map[item.lenderKey] = { ...item.lenderInfo, tvlUsd: item.tvlUsd ?? 0 }
+          } else {
+            map[item.lenderKey].tvlUsd = (map[item.lenderKey].tvlUsd ?? 0) + (item.tvlUsd ?? 0)
           }
         }
         if (!cancelled) setLenders(map)
