@@ -30,7 +30,7 @@ importers:
         version: link:../settlement-sdk
       '@tailwindcss/vite':
         specifier: ^4.2.2
-        version: 4.2.2(vite@8.0.1(@types/node@25.5.0)(esbuild@0.27.3)(jiti@2.6.1))
+        version: 4.2.2(vite@8.0.1(@types/node@25.5.0)(esbuild@0.27.3)(jiti@2.6.1)(yaml@2.8.3))
       '@tanstack/react-query':
         specifier: ^5.91.2
         version: 5.91.2(react@19.2.4)
@@ -70,7 +70,7 @@ importers:
         version: 19.2.3(@types/react@19.2.14)
       '@vitejs/plugin-react':
         specifier: ^6.0.1
-        version: 6.0.1(vite@8.0.1(@types/node@25.5.0)(esbuild@0.27.3)(jiti@2.6.1))
+        version: 6.0.1(vite@8.0.1(@types/node@25.5.0)(esbuild@0.27.3)(jiti@2.6.1)(yaml@2.8.3))
       eslint:
         specifier: ^10.0.3
         version: 10.0.3(jiti@2.6.1)
@@ -91,7 +91,7 @@ importers:
         version: 8.57.1(eslint@10.0.3(jiti@2.6.1))(typescript@5.9.3)
       vite:
         specifier: ^8.0.1
-        version: 8.0.1(@types/node@25.5.0)(esbuild@0.27.3)(jiti@2.6.1)
+        version: 8.0.1(@types/node@25.5.0)(esbuild@0.27.3)(jiti@2.6.1)(yaml@2.8.3)
 
   packages/lending-agent:
     dependencies:
@@ -101,9 +101,12 @@ importers:
       '@anthropic-ai/sdk':
         specifier: ^0.78.0
         version: 0.78.0(zod@4.3.6)
-      '@modelcontextprotocol/sdk':
-        specifier: ^1.23.0
-        version: 1.23.0(zod@4.3.6)
+      '@tetherto/wdk-protocol-lending-aave-evm':
+        specifier: 1.0.0-beta.3
+        version: 1.0.0-beta.3(bare-abort-controller@1.1.0)(bare-buffer@3.6.0)(bare-events@2.8.2(bare-abort-controller@1.1.0))(bare-tcp@2.2.7(bare-abort-controller@1.1.0)(bare-buffer@3.6.0))(bare-url@2.3.2)(typescript@5.8.3)(viem@2.47.5(typescript@5.8.3)(zod@4.3.6))(zod@4.3.6)
+      '@tetherto/wdk-protocol-swap-velora-evm':
+        specifier: 1.0.0-beta.4
+        version: 1.0.0-beta.4(axios@1.13.6)(bare-abort-controller@1.1.0)(bare-buffer@3.6.0)(bare-events@2.8.2(bare-abort-controller@1.1.0))(bare-tcp@2.2.7(bare-abort-controller@1.1.0)(bare-buffer@3.6.0))(bare-url@2.3.2)(typescript@5.8.3)(viem@2.47.5(typescript@5.8.3)(zod@4.3.6))(zod@4.3.6)
       '@tetherto/wdk-wallet-evm':
         specifier: 1.0.0-beta.8
         version: 1.0.0-beta.8(bare-abort-controller@1.1.0)(bare-buffer@3.6.0)(bare-events@2.8.2(bare-abort-controller@1.1.0))(bare-tcp@2.2.7(bare-abort-controller@1.1.0)(bare-buffer@3.6.0))(bare-url@2.3.2)
@@ -6852,6 +6855,11 @@ packages:
   yallist@3.1.1:
     resolution: {integrity: sha512-a4UGQaWPH59mOXUYnAG2ewncQS4i4F43Tv3JoAM+s2VDAmS9NsK8GpDMLrCHPksFT7h3K6TOoUNn2pb7RoXx4g==}
 
+  yaml@2.8.3:
+    resolution: {integrity: sha512-AvbaCLOO2Otw/lW5bmh9d/WEdcDFdQp2Z2ZUH3pX9U2ihyUY0nvLv7J6TrWowklRGPYbB/IuIMfYgxaCPg5Bpg==}
+    engines: {node: '>= 14.6'}
+    hasBin: true
+
   yargs-parser@20.2.9:
     resolution: {integrity: sha512-y11nGElTIV+CT3Zv9t7VKl+Q3hTQoT9a1Qzezhhl6Rp21gJ/IVTW7Z3y9EWXhuUBC2Shnf+DX0antecpAwSP8w==}
     engines: {node: '>=10'}
@@ -7143,6 +7151,10 @@ snapshots:
   '@bgd-labs/aave-address-book@4.33.0(viem@2.47.5(typescript@5.8.3)(zod@3.25.76))':
     dependencies:
       viem: 2.47.5(typescript@5.8.3)(zod@3.25.76)
+
+  '@bgd-labs/aave-address-book@4.33.0(viem@2.47.5(typescript@5.8.3)(zod@4.3.6))':
+    dependencies:
+      viem: 2.47.5(typescript@5.8.3)(zod@4.3.6)
 
   '@bitcoinerlab/coinselect@1.3.1':
     dependencies:
@@ -8203,24 +8215,6 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  '@modelcontextprotocol/sdk@1.23.0(zod@4.3.6)':
-    dependencies:
-      ajv: 8.18.0
-      ajv-formats: 3.0.1(ajv@8.18.0)
-      content-type: 1.0.5
-      cors: 2.8.6
-      cross-spawn: 7.0.6
-      eventsource: 3.0.7
-      eventsource-parser: 3.0.6
-      express: 5.2.1
-      express-rate-limit: 7.5.1(express@5.2.1)
-      pkce-challenge: 5.0.1
-      raw-body: 3.0.2
-      zod: 4.3.6
-      zod-to-json-schema: 3.25.1(zod@4.3.6)
-    transitivePeerDependencies:
-      - supports-color
-
   '@moonpay/moonpay-node@0.2.13': {}
 
   '@napi-rs/wasm-runtime@0.2.12':
@@ -8633,6 +8627,13 @@ snapshots:
       - typescript
       - zod
 
+  '@safe-global/types-kit@3.0.0(typescript@5.8.3)(zod@4.3.6)':
+    dependencies:
+      abitype: 1.2.3(typescript@5.8.3)(zod@4.3.6)
+    transitivePeerDependencies:
+      - typescript
+      - zod
+
   '@scure/base@1.1.9': {}
 
   '@scure/base@1.2.6': {}
@@ -8806,12 +8807,12 @@ snapshots:
       '@tailwindcss/oxide-win32-arm64-msvc': 4.2.2
       '@tailwindcss/oxide-win32-x64-msvc': 4.2.2
 
-  '@tailwindcss/vite@4.2.2(vite@8.0.1(@types/node@25.5.0)(esbuild@0.27.3)(jiti@2.6.1))':
+  '@tailwindcss/vite@4.2.2(vite@8.0.1(@types/node@25.5.0)(esbuild@0.27.3)(jiti@2.6.1)(yaml@2.8.3))':
     dependencies:
       '@tailwindcss/node': 4.2.2
       '@tailwindcss/oxide': 4.2.2
       tailwindcss: 4.2.2
-      vite: 8.0.1(@types/node@25.5.0)(esbuild@0.27.3)(jiti@2.6.1)
+      vite: 8.0.1(@types/node@25.5.0)(esbuild@0.27.3)(jiti@2.6.1)(yaml@2.8.3)
 
   '@tanstack/query-core@5.91.2': {}
 
@@ -8902,12 +8903,60 @@ snapshots:
       - viem
       - zod
 
+  '@tetherto/wdk-protocol-lending-aave-evm@1.0.0-beta.3(bare-abort-controller@1.1.0)(bare-buffer@3.6.0)(bare-events@2.8.2(bare-abort-controller@1.1.0))(bare-tcp@2.2.7(bare-abort-controller@1.1.0)(bare-buffer@3.6.0))(bare-url@2.3.2)(typescript@5.8.3)(viem@2.47.5(typescript@5.8.3)(zod@4.3.6))(zod@4.3.6)':
+    dependencies:
+      '@bgd-labs/aave-address-book': 4.33.0(viem@2.47.5(typescript@5.8.3)(zod@4.3.6))
+      '@tetherto/wdk-wallet': 1.0.0-beta.7(bare-tcp@2.2.7(bare-abort-controller@1.1.0)(bare-buffer@3.6.0))
+      '@tetherto/wdk-wallet-evm': 1.0.0-beta.8(bare-abort-controller@1.1.0)(bare-buffer@3.6.0)(bare-events@2.8.2(bare-abort-controller@1.1.0))(bare-tcp@2.2.7(bare-abort-controller@1.1.0)(bare-buffer@3.6.0))(bare-url@2.3.2)
+      '@tetherto/wdk-wallet-evm-erc-4337': 1.0.0-beta.5(bare-abort-controller@1.1.0)(bare-buffer@3.6.0)(bare-events@2.8.2(bare-abort-controller@1.1.0))(bare-tcp@2.2.7(bare-abort-controller@1.1.0)(bare-buffer@3.6.0))(bare-url@2.3.2)(typescript@5.8.3)(zod@4.3.6)
+      bare-node-runtime: 1.2.0(bare-tcp@2.2.7(bare-abort-controller@1.1.0)(bare-buffer@3.6.0))
+      ethers: 6.14.3
+    transitivePeerDependencies:
+      - bare-abort-controller
+      - bare-buffer
+      - bare-events
+      - bare-tcp
+      - bare-url
+      - bufferutil
+      - debug
+      - react-native-b4a
+      - sodium-javascript
+      - typescript
+      - utf-8-validate
+      - viem
+      - zod
+
   '@tetherto/wdk-protocol-swap-velora-evm@1.0.0-beta.4(axios@1.13.6)(bare-abort-controller@1.1.0)(bare-buffer@3.6.0)(bare-events@2.8.2(bare-abort-controller@1.1.0))(bare-tcp@2.2.7(bare-abort-controller@1.1.0)(bare-buffer@3.6.0))(bare-url@2.3.2)(typescript@5.8.3)(viem@2.47.5(typescript@5.8.3)(zod@3.25.76))(zod@3.25.76)':
     dependencies:
       '@tetherto/wdk-wallet': 1.0.0-beta.7(bare-tcp@2.2.7(bare-abort-controller@1.1.0)(bare-buffer@3.6.0))
       '@tetherto/wdk-wallet-evm': 1.0.0-beta.8(bare-abort-controller@1.1.0)(bare-buffer@3.6.0)(bare-events@2.8.2(bare-abort-controller@1.1.0))(bare-tcp@2.2.7(bare-abort-controller@1.1.0)(bare-buffer@3.6.0))(bare-url@2.3.2)
       '@tetherto/wdk-wallet-evm-erc-4337': 1.0.0-beta.5(bare-abort-controller@1.1.0)(bare-buffer@3.6.0)(bare-events@2.8.2(bare-abort-controller@1.1.0))(bare-tcp@2.2.7(bare-abort-controller@1.1.0)(bare-buffer@3.6.0))(bare-url@2.3.2)(typescript@5.8.3)(zod@3.25.76)
       '@velora-dex/sdk': 9.0.0(axios@1.13.6)(ethers@6.13.5)(typescript@5.8.3)(viem@2.47.5(typescript@5.8.3)(zod@3.25.76))
+      bare-node-runtime: 1.2.0(bare-tcp@2.2.7(bare-abort-controller@1.1.0)(bare-buffer@3.6.0))
+      ethers: 6.13.5
+    transitivePeerDependencies:
+      - axios
+      - bare-abort-controller
+      - bare-buffer
+      - bare-events
+      - bare-tcp
+      - bare-url
+      - bufferutil
+      - debug
+      - react-native-b4a
+      - sodium-javascript
+      - typescript
+      - utf-8-validate
+      - viem
+      - web3
+      - zod
+
+  '@tetherto/wdk-protocol-swap-velora-evm@1.0.0-beta.4(axios@1.13.6)(bare-abort-controller@1.1.0)(bare-buffer@3.6.0)(bare-events@2.8.2(bare-abort-controller@1.1.0))(bare-tcp@2.2.7(bare-abort-controller@1.1.0)(bare-buffer@3.6.0))(bare-url@2.3.2)(typescript@5.8.3)(viem@2.47.5(typescript@5.8.3)(zod@4.3.6))(zod@4.3.6)':
+    dependencies:
+      '@tetherto/wdk-wallet': 1.0.0-beta.7(bare-tcp@2.2.7(bare-abort-controller@1.1.0)(bare-buffer@3.6.0))
+      '@tetherto/wdk-wallet-evm': 1.0.0-beta.8(bare-abort-controller@1.1.0)(bare-buffer@3.6.0)(bare-events@2.8.2(bare-abort-controller@1.1.0))(bare-tcp@2.2.7(bare-abort-controller@1.1.0)(bare-buffer@3.6.0))(bare-url@2.3.2)
+      '@tetherto/wdk-wallet-evm-erc-4337': 1.0.0-beta.5(bare-abort-controller@1.1.0)(bare-buffer@3.6.0)(bare-events@2.8.2(bare-abort-controller@1.1.0))(bare-tcp@2.2.7(bare-abort-controller@1.1.0)(bare-buffer@3.6.0))(bare-url@2.3.2)(typescript@5.8.3)(zod@4.3.6)
+      '@velora-dex/sdk': 9.0.0(axios@1.13.6)(ethers@6.13.5)(typescript@5.8.3)(viem@2.47.5(typescript@5.8.3)(zod@4.3.6))
       bare-node-runtime: 1.2.0(bare-tcp@2.2.7(bare-abort-controller@1.1.0)(bare-buffer@3.6.0))
       ethers: 6.13.5
     transitivePeerDependencies:
@@ -8945,6 +8994,24 @@ snapshots:
       - utf-8-validate
       - zod
 
+  '@tetherto/wdk-safe-protocol-kit@6.1.3(ethers@6.14.4)(typescript@5.8.3)(zod@4.3.6)':
+    dependencies:
+      '@safe-global/safe-deployments': 1.37.53
+      '@safe-global/safe-modules-deployments': 2.2.25
+      '@safe-global/types-kit': 3.0.0(typescript@5.8.3)(zod@4.3.6)
+      abitype: 1.2.3(typescript@5.8.3)(zod@4.3.6)
+      ethers: 6.14.4
+      semver: 7.7.4
+      viem: 2.47.5(typescript@5.8.3)(zod@4.3.6)
+    optionalDependencies:
+      '@noble/curves': 1.9.7
+      '@peculiar/asn1-schema': 2.6.0
+    transitivePeerDependencies:
+      - bufferutil
+      - typescript
+      - utf-8-validate
+      - zod
+
   '@tetherto/wdk-safe-relay-kit@4.1.5(ethers@6.14.4)(typescript@5.8.3)(zod@3.25.76)':
     dependencies:
       '@gelatonetwork/relay-sdk': 5.7.0
@@ -8953,6 +9020,22 @@ snapshots:
       '@tetherto/wdk-safe-protocol-kit': 6.1.3(ethers@6.14.4)(typescript@5.8.3)(zod@3.25.76)
       semver: 7.7.4
       viem: 2.47.5(typescript@5.8.3)(zod@3.25.76)
+    transitivePeerDependencies:
+      - bufferutil
+      - debug
+      - ethers
+      - typescript
+      - utf-8-validate
+      - zod
+
+  '@tetherto/wdk-safe-relay-kit@4.1.5(ethers@6.14.4)(typescript@5.8.3)(zod@4.3.6)':
+    dependencies:
+      '@gelatonetwork/relay-sdk': 5.7.0
+      '@safe-global/safe-modules-deployments': 2.2.25
+      '@safe-global/types-kit': 3.0.0(typescript@5.8.3)(zod@4.3.6)
+      '@tetherto/wdk-safe-protocol-kit': 6.1.3(ethers@6.14.4)(typescript@5.8.3)(zod@4.3.6)
+      semver: 7.7.4
+      viem: 2.47.5(typescript@5.8.3)(zod@4.3.6)
     transitivePeerDependencies:
       - bufferutil
       - debug
@@ -8989,6 +9072,27 @@ snapshots:
   '@tetherto/wdk-wallet-evm-erc-4337@1.0.0-beta.5(bare-abort-controller@1.1.0)(bare-buffer@3.6.0)(bare-events@2.8.2(bare-abort-controller@1.1.0))(bare-tcp@2.2.7(bare-abort-controller@1.1.0)(bare-buffer@3.6.0))(bare-url@2.3.2)(typescript@5.8.3)(zod@3.25.76)':
     dependencies:
       '@tetherto/wdk-safe-relay-kit': 4.1.5(ethers@6.14.4)(typescript@5.8.3)(zod@3.25.76)
+      '@tetherto/wdk-wallet': 1.0.0-beta.7(bare-tcp@2.2.7(bare-abort-controller@1.1.0)(bare-buffer@3.6.0))
+      '@tetherto/wdk-wallet-evm': 1.0.0-beta.8(bare-abort-controller@1.1.0)(bare-buffer@3.6.0)(bare-events@2.8.2(bare-abort-controller@1.1.0))(bare-tcp@2.2.7(bare-abort-controller@1.1.0)(bare-buffer@3.6.0))(bare-url@2.3.2)
+      bare-node-runtime: 1.2.0(bare-tcp@2.2.7(bare-abort-controller@1.1.0)(bare-buffer@3.6.0))
+      ethers: 6.14.4
+    transitivePeerDependencies:
+      - bare-abort-controller
+      - bare-buffer
+      - bare-events
+      - bare-tcp
+      - bare-url
+      - bufferutil
+      - debug
+      - react-native-b4a
+      - sodium-javascript
+      - typescript
+      - utf-8-validate
+      - zod
+
+  '@tetherto/wdk-wallet-evm-erc-4337@1.0.0-beta.5(bare-abort-controller@1.1.0)(bare-buffer@3.6.0)(bare-events@2.8.2(bare-abort-controller@1.1.0))(bare-tcp@2.2.7(bare-abort-controller@1.1.0)(bare-buffer@3.6.0))(bare-url@2.3.2)(typescript@5.8.3)(zod@4.3.6)':
+    dependencies:
+      '@tetherto/wdk-safe-relay-kit': 4.1.5(ethers@6.14.4)(typescript@5.8.3)(zod@4.3.6)
       '@tetherto/wdk-wallet': 1.0.0-beta.7(bare-tcp@2.2.7(bare-abort-controller@1.1.0)(bare-buffer@3.6.0))
       '@tetherto/wdk-wallet-evm': 1.0.0-beta.8(bare-abort-controller@1.1.0)(bare-buffer@3.6.0)(bare-events@2.8.2(bare-abort-controller@1.1.0))(bare-tcp@2.2.7(bare-abort-controller@1.1.0)(bare-buffer@3.6.0))(bare-url@2.3.2)
       bare-node-runtime: 1.2.0(bare-tcp@2.2.7(bare-abort-controller@1.1.0)(bare-buffer@3.6.0))
@@ -9370,10 +9474,21 @@ snapshots:
     transitivePeerDependencies:
       - typescript
 
-  '@vitejs/plugin-react@6.0.1(vite@8.0.1(@types/node@25.5.0)(esbuild@0.27.3)(jiti@2.6.1))':
+  '@velora-dex/sdk@9.0.0(axios@1.13.6)(ethers@6.13.5)(typescript@5.8.3)(viem@2.47.5(typescript@5.8.3)(zod@4.3.6))':
+    dependencies:
+      '@paraswap/core': 2.4.0
+      ts-essentials: 10.1.1(typescript@5.8.3)
+    optionalDependencies:
+      axios: 1.13.6
+      ethers: 6.13.5
+      viem: 2.47.5(typescript@5.8.3)(zod@4.3.6)
+    transitivePeerDependencies:
+      - typescript
+
+  '@vitejs/plugin-react@6.0.1(vite@8.0.1(@types/node@25.5.0)(esbuild@0.27.3)(jiti@2.6.1)(yaml@2.8.3))':
     dependencies:
       '@rolldown/pluginutils': 1.0.0-rc.7
-      vite: 8.0.1(@types/node@25.5.0)(esbuild@0.27.3)(jiti@2.6.1)
+      vite: 8.0.1(@types/node@25.5.0)(esbuild@0.27.3)(jiti@2.6.1)(yaml@2.8.3)
 
   '@vitest/expect@2.1.9':
     dependencies:
@@ -14728,7 +14843,7 @@ snapshots:
       fsevents: 2.3.3
       lightningcss: 1.32.0
 
-  vite@8.0.1(@types/node@25.5.0)(esbuild@0.27.3)(jiti@2.6.1):
+  vite@8.0.1(@types/node@25.5.0)(esbuild@0.27.3)(jiti@2.6.1)(yaml@2.8.3):
     dependencies:
       lightningcss: 1.32.0
       picomatch: 4.0.3
@@ -14740,6 +14855,7 @@ snapshots:
       esbuild: 0.27.3
       fsevents: 2.3.3
       jiti: 2.6.1
+      yaml: 2.8.3
 
   vitest@2.1.9(@types/node@20.19.37)(lightningcss@1.32.0):
     dependencies:
@@ -14993,6 +15109,9 @@ snapshots:
 
   yallist@3.1.1: {}
 
+  yaml@2.8.3:
+    optional: true
+
   yargs-parser@20.2.9: {}
 
   yargs-parser@21.1.1: {}
@@ -15048,10 +15167,6 @@ snapshots:
   zod-to-json-schema@3.25.1(zod@3.25.76):
     dependencies:
       zod: 3.25.76
-
-  zod-to-json-schema@3.25.1(zod@4.3.6):
-    dependencies:
-      zod: 4.3.6
 
   zod-validation-error@4.0.2(zod@4.3.6):
     dependencies:
