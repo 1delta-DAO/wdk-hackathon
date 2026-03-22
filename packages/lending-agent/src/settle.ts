@@ -210,16 +210,79 @@ export interface SettlementInput {
 }
 
 /**
+ * Filters permits to only include those not already satisfied on-chain.
+ * Morpho authorization, Compound V3 allow, and Aave delegation are all
+ * persistent — once granted they remain until revoked, so re-sending a
+ * stale sig will revert with a nonce error.
+ */
+async function filterPermits(
+  permits: SignedPermit[],
+  user: Address,
+  settlement: Address,
+  rpcUrl: string,
+): Promise<SignedPermit[]> {
+  const client = createPublicClient({ transport: http(rpcUrl) })
+  const result: SignedPermit[] = []
+
+  for (const permit of permits) {
+    try {
+      if (permit.kind === 'MORPHO_AUTHORIZATION') {
+        const authorized = await client.readContract({
+          address: permit.targetAddress as Address,
+          abi: MORPHO_IS_AUTHORIZED_ABI,
+          functionName: 'isAuthorized',
+          args: [user, settlement],
+        })
+        if (authorized) {
+          console.log(`  Skipping MORPHO_AUTHORIZATION — already authorized (morpho=${permit.targetAddress})`)
+          continue
+        }
+      } else if (permit.kind === 'COMPOUND_V3_ALLOW') {
+        const allowed = await client.readContract({
+          address: permit.targetAddress as Address,
+          abi: COMET_IS_ALLOWED_ABI,
+          functionName: 'isAllowed',
+          args: [user, settlement],
+        })
+        if (allowed) {
+          console.log(`  Skipping COMPOUND_V3_ALLOW — already allowed (comet=${permit.targetAddress})`)
+          continue
+        }
+      } else if (permit.kind === 'AAVE_DELEGATION') {
+        const allowance = await client.readContract({
+          address: permit.targetAddress as Address,
+          abi: AAVE_BORROW_ALLOWANCE_ABI,
+          functionName: 'borrowAllowance',
+          args: [user, settlement],
+        })
+        if (allowance > 0n) {
+          console.log(`  Skipping AAVE_DELEGATION — already delegated (vToken=${permit.targetAddress}, allowance=${allowance})`)
+          continue
+        }
+      }
+    } catch (err) {
+      // Can't determine auth state — include the permit to be safe
+      console.warn(`  Could not check auth state for ${permit.kind} (${permit.targetAddress}): ${err instanceof Error ? err.message : err} — including permit`)
+    }
+    result.push(permit)
+  }
+
+  return result
+}
+
+/**
  * Builds the settleWithFlashLoan calldata from the chosen leaves.
  * Does NOT submit — returns the tx object for WDK sendTransaction.
+ * If rpcUrl is provided, on-chain auth state is checked and already-satisfied
+ * permits (Morpho, Compound V3, Aave delegation) are omitted from the multicall.
  */
-export function buildSettlementTx(input: SettlementInput): {
+export async function buildSettlementTx(input: SettlementInput, rpcUrl?: string): Promise<{
   to: Address
   data: Hex
   chainId: number
   flashAmount: bigint
   borrowAmount: bigint
-} {
+}> {
   // Compute Merkle proofs from the full leaf set (API does not return proofs)
   const leafHashes = input.order.order.leaves.map(l => l.leaf as Hex)
   const { proofs } = buildMerkleTree(leafHashes)
@@ -303,7 +366,12 @@ export function buildSettlementTx(input: SettlementInput): {
   })
 
   // Build multicall if there are permits or approvals to bundle
-  const permits = input.order.order.permits ?? []
+  // Skip permits that are already satisfied on-chain (persistent auth doesn't need re-signing)
+  const rawPermits = input.order.order.permits ?? []
+  const permits = rpcUrl
+    ? await filterPermits(rawPermits, input.user, input.settlement, rpcUrl)
+    : rawPermits
+
   const permitCalls = permits.map(p =>
     encodePermitCall(p, input.user, input.settlement),
   )
@@ -362,7 +430,10 @@ export async function executeSettlement(
   wdkClient: Client,
   input: SettlementInput,
 ): Promise<string> {
-  const tx = buildSettlementTx(input)
+  const rpcUrl = RPC_URL_BY_CHAIN[input.order.order.chainId]
+  if (!rpcUrl) throw new Error(`No RPC URL for chainId ${input.order.order.chainId}`)
+
+  const tx = await buildSettlementTx(input, rpcUrl)
 
   console.log('\n=== Settlement Tx ===')
   console.log(`  chainId:       ${tx.chainId}`)
@@ -373,15 +444,14 @@ export async function executeSettlement(
   console.log(`  collateral:    ${input.collateralAsset}`)
   console.log(`  source lender: ${input.sourceRepayLeaf.lender}`)
   console.log(`  dest lender:   ${input.destDepositLeaf.lender}`)
+  console.log(`  calldata:      ${tx.data}`)
+  console.log(`  from (solver): ${input.feeRecipient ?? input.user}`)
 
   if (ECONOMIC_MODE) {
     const chainContracts = CONTRACTS_BY_CHAIN[input.order.order.chainId]
     const fromAddress = input.feeRecipient ?? input.user
     console.log('\n[Economic check] Estimating gas vs solver fee…')
     try {
-      const rpcUrl = RPC_URL_BY_CHAIN[tx.chainId]
-      if (!rpcUrl) throw new Error('RPC not found')
-
       const check = await checkEconomicViability(
         input,
         { to: tx.to, data: tx.data },
@@ -395,10 +465,10 @@ export async function executeSettlement(
         return 'SKIPPED_NOT_ECONOMIC'
       }
     } catch (err) {
-      // If the check itself fails (e.g. RPC issue), skip rather than risk a loss
       const msg = err instanceof Error ? err.message : String(err)
-      console.warn(`  Economic check failed (${msg}) — skipping to be safe`)
-      return 'SKIPPED_NOT_ECONOMIC'
+      // estimateGas throws before oracle calls — so any error here is a tx-level revert
+      console.warn(`  Gas estimation reverted (${msg.slice(0, 120)}) — tx would fail on-chain, skipping`)
+      return 'SKIPPED_INVALID_TX'
     }
   }
 
@@ -407,9 +477,6 @@ export async function executeSettlement(
     console.log(tx.data.slice(0, 200) + '…')
     return 'DRY_RUN'
   }
-
-  const rpcUrl = RPC_URL_BY_CHAIN[tx.chainId]
-  if (!rpcUrl) throw new Error(`No RPC URL for chainId ${tx.chainId}`)
 
   const seed = process.env.WDK_SEED
   if (!seed) throw new Error('WDK_SEED env var is required for transaction signing')
