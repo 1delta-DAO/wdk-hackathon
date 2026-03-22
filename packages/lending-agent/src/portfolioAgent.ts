@@ -247,7 +247,11 @@ export async function runPortfolioManagement(chainId: number): Promise<void> {
     for (const a of plannedActions) {
       console.log(`  [${a.action}] ${a.reason}${a.details ? ' — ' + a.details : ''}`)
     }
-    return 'Actions recorded. Now execute them one by one.'
+    const hasRealActions = plannedActions.some(a => a.action !== 'no_action')
+    if (!hasRealActions) {
+      return 'Plan recorded: no_action. You are done — do NOT execute any swaps or supply calls.'
+    }
+    return 'Actions recorded. Execute each action in order using the available tools.'
   }
 
   const swapHandler = async (input: Record<string, unknown>) => {
@@ -316,10 +320,13 @@ export async function runPortfolioManagement(chainId: number): Promise<void> {
 
   const result = await runAgentLoop(router, systemPrompt, allTools, userMessage)
 
+  const noActionOnly = plannedActions.length === 1 && plannedActions[0].action === 'no_action'
   if (plannedActions.length === 0) {
     console.log('\n  Agent did not call record_actions — no structured plan captured.')
+  } else if (noActionOnly) {
+    console.log(`\n  No action taken: ${plannedActions[0].reason}`)
   }
 
   console.log('\n=== Portfolio Agent Result ===')
-  console.log(result)
+  console.log(result || '(no further commentary from agent)')
 }

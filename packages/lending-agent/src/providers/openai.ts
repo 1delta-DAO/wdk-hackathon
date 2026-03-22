@@ -28,10 +28,15 @@ export class OpenAIProvider implements AgentProvider {
       { role: 'user', content: userMessage },
     ]
 
+    // Force the first response to be a tool call — prevents the model from describing
+    // what it would do in text instead of actually invoking the function-calling API.
+    // Using 'required' (any tool) rather than forcing a specific function name because
+    // gpt-4o-mini sometimes ignores named-function forcing and returns an empty stop response.
     let response = await openai.chat.completions.create({
       model,
       max_completion_tokens: 8192,
       tools: openaiTools,
+      tool_choice: 'required',
       messages,
     })
 
@@ -61,6 +66,7 @@ export class OpenAIProvider implements AgentProvider {
         messages.push({ role: 'tool', tool_call_id: tc.id, content: resultText })
       }
 
+      // Subsequent turns: auto — allows the model to give a final text response when done
       response = await openai.chat.completions.create({
         model,
         max_completion_tokens: 8192,
