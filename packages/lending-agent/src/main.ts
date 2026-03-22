@@ -28,6 +28,7 @@ export async function runSettlementFlow(
   clients: AgentClients,
   orderId: string,
   chainId: number,
+  forceMigration = false,
 ): Promise<string> {
   const { oneDeltaClient, wdkClient } = clients
   const chainContracts = CONTRACTS_BY_CHAIN[chainId]
@@ -82,10 +83,12 @@ export async function runSettlementFlow(
   }
 
   // ── Flat option list (one entry per source→dest pair) ────
-  // Filter to only options with a strictly positive improvement — no point migrating otherwise
-  const flatOptions = buildFlatOptions(ctx).filter(
-    o => o.destination.improvement !== null && o.destination.improvement > 0,
-  )
+  // Filter to only options with a strictly positive improvement — no point migrating otherwise.
+  // Set FORCE_MIGRATION=true to bypass this for live testing.
+  const allFlatOptions = buildFlatOptions(ctx)
+  const flatOptions = forceMigration
+    ? allFlatOptions
+    : allFlatOptions.filter(o => o.destination.improvement !== null && o.destination.improvement > 0)
 
   if (flatOptions.length === 0) {
     console.log('No migration options with positive improvement — skipping order.')
@@ -201,6 +204,7 @@ export async function runSettlementFlow(
 export async function runAllSettlements(
   clients: AgentClients,
   chainId: number,
+  forceMigration = false,
 ): Promise<{ orderId: string; result: string }[]> {
   console.log(`\nFetching open orders for chain ${chainId}…`)
   const orders = await fetchOpenOrders(chainId)
@@ -211,7 +215,7 @@ export async function runAllSettlements(
   for (const order of orders) {
     console.log(`\n─── Processing order ${order.id} ───`)
     try {
-      const result = await runSettlementFlow(clients, order.id, chainId)
+      const result = await runSettlementFlow(clients, order.id, chainId, forceMigration)
       results.push({ orderId: order.id, result })
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
