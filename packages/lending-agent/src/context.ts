@@ -12,8 +12,6 @@
  */
 
 import type { Address } from 'viem'
-import type { Client } from '@modelcontextprotocol/sdk/client/index.js'
-import { callToolRaw } from './mcp.js'
 import type { LeafDescription, StoredOrder } from './order.js'
 import { cometToLender, ONEDELTA_PORTAL_URL, ONEDELTA_PORTAL_API_KEY } from './config.js'
 
@@ -120,13 +118,13 @@ export function groupLeaves(leaves: LeafDescription[]): LeafGroup[] {
 async function fetchAllPositions(
   signer: string,
   chainId: number,
-  oneDeltaClient: Client,
 ): Promise<PositionItem[]> {
-  const raw = await callToolRaw(oneDeltaClient, 'get_user_positions', {
-    account: signer,
-    chains: String(chainId),
-  })
-  const parsed = JSON.parse(raw) as { data?: { items?: PositionItem[] } }
+  const url = `${ONEDELTA_PORTAL_URL}/v1/data/lending/user-positions?account=${signer}&chains=${chainId}`
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+  if (ONEDELTA_PORTAL_API_KEY) headers['Authorization'] = `Bearer ${ONEDELTA_PORTAL_API_KEY}`
+  const res = await fetch(url, { headers })
+  if (!res.ok) throw new Error(`1delta positions API error ${res.status}: ${await res.text()}`)
+  const parsed = await res.json() as { data?: { items?: PositionItem[] } }
   return parsed?.data?.items ?? []
 }
 
@@ -397,12 +395,11 @@ export async function buildSettlementContext(
   order: StoredOrder,
   chainId: number,
   leafDescriptions: LeafDescription[],
-  oneDeltaClient: Client,
 ): Promise<SettlementContext | null> {
   const groups = groupLeaves(leafDescriptions)
 
   console.log(`\n  Fetching positions for ${order.signer}…`)
-  const positions = await fetchAllPositions(order.signer, chainId, oneDeltaClient)
+  const positions = await fetchAllPositions(order.signer, chainId)
 
   // ── Collect all viable source candidates ─────────────────
   const sourceCandidates: { group: LeafGroup; position: PositionItem }[] = []
