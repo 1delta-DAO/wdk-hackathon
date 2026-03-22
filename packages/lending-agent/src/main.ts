@@ -36,7 +36,6 @@ export async function runSettlementFlow(
   const morphoPool = chainContracts.morphoPool
   if (!settlement) throw new Error('SETTLEMENT CONTRACT ADDRESS is required')
   if (!morphoPool) throw new Error('MORPHO POOL ADDRESS is required')
-  // await markOrderFilled(orderId, chainId)
 
   // ── Fetch order ──────────────────────────────────────────
   console.log(`\nFetching order ${orderId}…`)
@@ -50,11 +49,18 @@ export async function runSettlementFlow(
 
   console.log('\nLeaves:')
   leafDescriptions.forEach(l => {
-    const extra = l.pool ? `pool=${l.pool.slice(0, 10)}…`
-      : l.loanToken ? `loan=${l.loanToken.slice(0, 10)}… coll=${l.collateralToken?.slice(0, 10)}… lltv=${l.lltv}`
-      : l.comet ? `comet=${l.comet.slice(0, 10)}…`
-      : ''
-    console.log(`  [${l.index}] ${l.op} ${l.protocol} ${extra}`)
+    const parts: string[] = []
+    if (l.pool)            parts.push(`pool=${l.pool}`)
+    if (l.aToken)          parts.push(`aToken=${l.aToken}`)
+    if (l.vToken)          parts.push(`vToken=${l.vToken}`)
+    if (l.comet)           parts.push(`comet=${l.comet}`)
+    if (l.loanToken)       parts.push(`loanToken=${l.loanToken}`)
+    if (l.collateralToken) parts.push(`collateralToken=${l.collateralToken}`)
+    if (l.lltv !== undefined) parts.push(`lltv=${l.lltv}`)
+    if (l.oracle)            parts.push(`oracle=${l.oracle}`)
+    if (l.morpho)            parts.push(`morpho=${l.morpho}`)
+    const extra = parts.join('  ')
+    console.log(`  [${l.index}] ${l.op} ${l.protocol}  ${extra}`)
   })
 
   // ── Pre-process: build settlement context ────────────────
