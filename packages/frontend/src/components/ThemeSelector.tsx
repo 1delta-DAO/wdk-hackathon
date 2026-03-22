@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
-import { Star, Moon, Zap, Sunset, CloudLightning, Eye, Hexagon, Circle, Activity, Crosshair } from 'react-feather'
+import { Star, Moon, Zap, Sunset, CloudLightning, Eye, Hexagon, Circle, Activity } from 'react-feather'
+import { Reticle } from './icons/Reticle'
 import type { FC } from 'react'
 
 interface ThemeDef {
@@ -10,7 +11,7 @@ interface ThemeDef {
 }
 
 const THEMES: ThemeDef[] = [
-  { id: 'usdt007',   label: 'USDT007',    icon: Crosshair,      custom: true },
+  { id: 'usdt007',   label: 'USDT007',    icon: Reticle,         custom: true },
   { id: 'nebula',    label: 'Nebula',     icon: Star,           custom: true },
   { id: 'deepspace', label: 'Deep Space', icon: Circle,         custom: true },
   { id: 'plasma',    label: 'Plasma',     icon: Activity,       custom: true },
