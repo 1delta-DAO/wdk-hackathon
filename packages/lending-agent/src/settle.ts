@@ -58,6 +58,19 @@ const COMPOUND_V3_ALLOW_ABI = parseAbi([
   'function compoundV3AllowBySig(address comet, address owner, address manager, bool isAllowed, uint256 nonce, uint256 expiry, uint8 v, bytes32 r, bytes32 s) external',
 ])
 
+// On-chain auth-check ABIs
+const MORPHO_IS_AUTHORIZED_ABI = parseAbi([
+  'function isAuthorized(address authorizer, address authorized) external view returns (bool)',
+])
+
+const COMET_IS_ALLOWED_ABI = parseAbi([
+  'function isAllowed(address owner, address manager) external view returns (bool)',
+])
+
+const AAVE_BORROW_ALLOWANCE_ABI = parseAbi([
+  'function borrowAllowance(address fromUser, address toUser) external view returns (uint256)',
+])
+
 /**
  * Encodes a signed permit into settlement contract calldata.
  * Each permit kind maps to a different contract function.
@@ -163,13 +176,25 @@ export async function checkEconomicViability(
   // Solver fee in debt token base units
   const solverFeeBaseUnits = (flashAmount * BigInt(input.order.order.maxFeeBps)) / 10_000_000n
 
-  const [gasEstimate, gasPrice, ethPrice, debtPrice, debtDecimals] = await Promise.all([
-    client.estimateGas({ account: fromAddress, to: txData.to, data: txData.data }),
-    client.getGasPrice(),
-    client.readContract({ address: aaveOracleAddress, abi: AAVE_ORACLE_ABI, functionName: 'getAssetPrice', args: [WETH_ARB] }),
-    client.readContract({ address: aaveOracleAddress, abi: AAVE_ORACLE_ABI, functionName: 'getAssetPrice', args: [input.debtAsset] }),
-    client.readContract({ address: input.debtAsset, abi: ERC20_ABI, functionName: 'decimals' }),
-  ])
+  // Validate tx first — a revert here means the migration itself is invalid, not an oracle issue.
+  // Let this throw — the caller distinguishes tx reverts from oracle errors.
+  const gasEstimate = await client.estimateGas({ account: fromAddress, to: txData.to, data: txData.data })
+
+  // Fetch prices separately — failures here are oracle/infra issues, not tx failures
+  let gasPrice: bigint, ethPrice: bigint, debtPrice: bigint, debtDecimals: number
+  try {
+    ;[gasPrice, ethPrice, debtPrice, debtDecimals] = await Promise.all([
+      client.getGasPrice(),
+      client.readContract({ address: aaveOracleAddress, abi: AAVE_ORACLE_ABI, functionName: 'getAssetPrice', args: [WETH_ARB] }),
+      client.readContract({ address: aaveOracleAddress, abi: AAVE_ORACLE_ABI, functionName: 'getAssetPrice', args: [input.debtAsset] }),
+      client.readContract({ address: input.debtAsset, abi: ERC20_ABI, functionName: 'decimals' }),
+    ])
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    // Oracle/infra failure after tx validated — skip economic check, assume viable
+    console.warn(`  Oracle/price check failed (${msg.slice(0, 100)}) — skipping economic check, proceeding`)
+    return { viable: true, reason: 'oracle unavailable — skipped economic check', solverFeeUsdE8: 0n, gasCostUsdE8: 0n }
+  }
 
   // Gas cost in USD (8 decimal precision): gasCostWei * ethPrice / 1e18
   const gasCostUsdE8 = (gasEstimate * gasPrice * ethPrice) / BigInt(1e18)
