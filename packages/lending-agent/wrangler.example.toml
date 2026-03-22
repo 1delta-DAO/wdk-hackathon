@@ -7,10 +7,23 @@ compatibility_flags = ["nodejs_compat"]
 [triggers]
 crons = ["0 * * * *"]
 
+# ── Module aliases ────────────────────────────────────────────────────────────
+# sodium-native is a Node.js native addon used only for sodium_memzero (memory
+# zeroing of private keys). Workers isolate execution contexts so a JS stub
+# that fills the buffer with zeros is equivalent for our purposes.
+[alias]
+"sodium-native" = "./src/sodium-native-stub.cjs"
+
+# ── Secrets — set via: wrangler secret put <NAME> ──────────────────────────
 [vars]
 # Anthropic API key for Claude Opus 4.6
 ANTHROPIC_API_KEY=""
-MODEL = "gpt-4o-mini"
+
+# OpenAI API key
+OPENAI_API_KEY=""
+
+# Model to use
+MODEL="gpt-4o-mini"
 
 # BIP-39 seed phrase for the WDK wallet (12 or 24 words)
 # WARNING: this controls a live wallet — never commit a real seed
@@ -20,13 +33,16 @@ WDK_SEED=""
 ONEDELTA_API_KEY=""
 
 # Set to "true" to skip actual transaction submission and just print calldata
-DRY_RUN=true
+DRY_RUN="false"
 
 # Bearer token to protect the /settle/* endpoints
 API_SECRET=""
 
 # Order backend
-ORDER_BACKEND_URL=""
+ORDER_BACKEND_URL="https://order-backend.achim-d87.workers.dev"
 
 # Chains to run the settlement job on
 CRON_CHAIN_IDS="42161"
+
+# Only fill order if profitable when true
+ECONOMIC_MODE="false"
