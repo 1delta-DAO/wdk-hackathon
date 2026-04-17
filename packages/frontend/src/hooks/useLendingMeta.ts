@@ -22,6 +22,13 @@ interface LatestResponse {
   }
 }
 
+interface LendersListResponse {
+  success: boolean
+  data: {
+    items: Array<{ key: string }>
+  }
+}
+
 /**
  * Fetches lender metadata from the portal lending/latest endpoint.
  * Returns a map of lenderKey -> LenderInfo, covering all protocol families.
@@ -41,10 +48,26 @@ export function useLendingMeta(chainId: number | null) {
 
     async function fetchMeta() {
       try {
+        // Step 1: enumerate available lender keys for this chain
+        const lendersRes = await fetch(
+          `${PORTAL_PROXY_URL}/v1/data/lending/lenders?chains=${chainId}`,
+        )
+        if (!lendersRes.ok) return
+        const lendersJson: LendersListResponse = await lendersRes.json()
+        if (!lendersJson.success) return
+
+        const keys = lendersJson.data.items.map(l => l.key).filter(Boolean)
+        if (keys.length === 0) {
+          if (!cancelled) setLenders({})
+          return
+        }
+
+        // Step 2: fetch latest metadata/TVL for those lenders
         const params = new URLSearchParams({
           chains: String(chainId),
           count: '1000',
         })
+        for (const k of keys) params.append('lenders', k)
 
         const res = await fetch(
           `${PORTAL_PROXY_URL}/v1/data/lending/latest?${params.toString()}`,

@@ -109,10 +109,9 @@ export async function fetchUserDataViaRpc(
   chainId: string,
   account: string,
 ): Promise<FetchUserDataResult> {
-  const batches = chainId === '1' ? `&batchSize=500` : ''
   const rpcCallUrl =
     `${PORTAL_PROXY_URL}/v1/data/lending/user-positions/rpc-call` +
-    `?chains=${chainId}&account=${account}${batches}`
+    `?chains=${chainId}&account=${account}&chunks=500`
 
   const {
     data: { rpcCallId, rpcCalls },
