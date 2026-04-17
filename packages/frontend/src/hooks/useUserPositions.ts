@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback } from 'react'
 import { PORTAL_PROXY_URL } from '../config/settlements'
+import { executeRpcCallsWithRetry, type RpcCall } from './executeRpcCalls'
 
-// ── Types ────────────────────────────────────────────────────────
+// ── Domain types ─────────────────────────────────────────────────
 
 export interface AssetInfo {
   chainId: string
@@ -50,129 +51,87 @@ export interface LenderPositions {
   data: AccountData[]
 }
 
-// ── RPC call response ────────────────────────────────────────────
+export type UserDataSummary = Record<string, unknown>
 
-interface RpcCallResponse {
+// ── API response types ───────────────────────────────────────────
+
+interface RpcCallApiResponse {
   success: boolean
   data: {
     rpcCallId: string
-    rpcCalls: Array<{
-      jsonrpc: string
-      id: number
-      method: string
-      params: [{ to: string; data: string }, string]
-    }>
-  }
-}
-
-interface ParseResponse {
-  success: boolean
-  data?: {
-    items: LenderPositions[]
+    rpcCalls: RpcCall[]
   }
   error?: { code: string; message: string }
 }
 
-// ── RPC URLs per chain (multiple for retry) ──────────────────────
-
-const RPC_URLS: Record<number, string[]> = {
-  1: [
-    'https://eth.llamarpc.com',
-    'https://rpc.ankr.com/eth',
-  ],
-  10: [
-    'https://mainnet.optimism.io',
-    'https://rpc.ankr.com/optimism',
-  ],
-  137: [
-    'https://polygon-rpc.com',
-    'https://rpc.ankr.com/polygon',
-  ],
-  42161: [
-    'https://arb1.arbitrum.io/rpc',
-    'https://arbitrum-one-rpc.publicnode.com',
-    'https://arb1.lava.build',
-    'https://arbitrum.drpc.org',
-    'https://arbitrum-one.public.blastapi.io',
-    'https://arbitrum.meowrpc.com',
-    'https://arbitrum-one-public.nodies.app',
-    'https://arbitrum.gateway.tenderly.co',
-    'https://arbitrum.public.blockpi.network/v1/rpc/public',
-    'https://public-arb-mainnet.fastnode.io',
-  ],
-  8453: [
-    'https://mainnet.base.org',
-    'https://base.drpc.org',
-  ],
-  59144: [
-    'https://rpc.linea.build',
-  ],
-  534352: [
-    'https://rpc.scroll.io',
-  ],
-  5000: [
-    'https://rpc.mantle.xyz',
-  ],
-  56: [
-    'https://bsc-dataseed.binance.org',
-    'https://bsc-dataseed1.defibit.io',
-  ],
+interface ParseApiResponse {
+  success: boolean
+  data: {
+    items: LenderPositions[]
+    summary?: UserDataSummary
+  }
+  error?: { code: string; message: string }
 }
 
-/**
- * Execute an RPC call with retry across multiple endpoints.
- * Tries each URL once, returns the first successful response.
- */
-async function rpcCallWithRetry(
-  chainId: number,
-  body: unknown,
-): Promise<unknown> {
-  const urls = RPC_URLS[chainId]
-  if (!urls || urls.length === 0) throw new Error(`No RPC URLs for chain ${chainId}`)
+export interface FetchUserDataResult {
+  data: LenderPositions[]
+  summary?: UserDataSummary
+}
 
-  const errors: string[] = []
+// ── Helpers ──────────────────────────────────────────────────────
 
-  for (const url of urls) {
-    try {
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-        signal: AbortSignal.timeout(10_000),
-      })
-      if (!res.ok) {
-        errors.push(`${url}: HTTP ${res.status}`)
-        continue
-      }
-      const json = await res.json()
-      // Check for JSON-RPC error in the response
-      if (Array.isArray(json)) {
-        const hasError = json.some((r: { error?: unknown }) => r.error)
-        if (hasError) {
-          errors.push(`${url}: JSON-RPC error`)
-          continue
-        }
-      } else if (json.error) {
-        errors.push(`${url}: ${json.error.message ?? 'JSON-RPC error'}`)
-        continue
-      }
-      return json
-    } catch (e) {
-      errors.push(`${url}: ${e instanceof Error ? e.message : String(e)}`)
-    }
+async function fetchApi<T extends { success: boolean; error?: { code: string; message: string } }>(
+  label: string,
+  url: string,
+  init?: RequestInit,
+): Promise<T> {
+  const res = await fetch(url, init)
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(`${label} HTTP ${res.status}: ${text || res.statusText}`)
   }
+  const json = (await res.json()) as T
+  if (!json.success) {
+    throw new Error(json.error?.message ?? `${label} API returned success: false`)
+  }
+  return json
+}
 
-  throw new Error(`All RPCs failed for chain ${chainId}: ${errors.join(' | ')}`)
+// ── Pure fetch function ──────────────────────────────────────────
+
+/**
+ * Fetches user lending data via the three-step RPC flow:
+ * 1. GET /lending/user-positions/rpc-call → call descriptors
+ * 2. Execute each call as eth_call via the user's RPC provider
+ * 3. POST /lending/user-positions/parse → structured user data
+ */
+export async function fetchUserDataViaRpc(
+  chainId: string,
+  account: string,
+): Promise<FetchUserDataResult> {
+  const batches = chainId === '1' ? `&batchSize=500` : ''
+  const rpcCallUrl =
+    `${PORTAL_PROXY_URL}/v1/data/lending/user-positions/rpc-call` +
+    `?chains=${chainId}&account=${account}${batches}`
+
+  const {
+    data: { rpcCallId, rpcCalls },
+  } = await fetchApi<RpcCallApiResponse>('rpc-call', rpcCallUrl)
+
+  const rawResponses = await executeRpcCallsWithRetry(chainId, rpcCalls)
+
+  const parseUrl = `${PORTAL_PROXY_URL}/v1/data/lending/user-positions/parse`
+  const parseResult = await fetchApi<ParseApiResponse>('parse', parseUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ rpcCallId, rawResponses }),
+  })
+
+  return { data: parseResult.data.items, summary: parseResult.data.summary }
 }
 
 // ── Hook ─────────────────────────────────────────────────────────
 
-/**
- * Fetches user lending positions via a two-step RPC flow:
- *  1. GET  /user-positions/rpc-call  → returns batched eth_call specs
- *  2. Execute the calls on-chain via the chain's public RPC (with retry)
- *  3. POST /user-positions/parse     → returns parsed position data
- */
 export function useUserPositions(
   account: string | undefined,
   chainId: number | null,
@@ -185,65 +144,30 @@ export function useUserPositions(
   const refetch = useCallback(() => setTick(t => t + 1), [])
 
   useEffect(() => {
-    if (!account || !chainId) {
-      setPositions([])
-      return
-    }
+    if (!account || !chainId) return
 
     let cancelled = false
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoading(true)
     setError(null)
 
-    async function fetchPositions() {
-      try {
-        // Step 1: Get RPC call specs (no lender filter = all lenders)
-        const params = new URLSearchParams({
-          account: account!,
-          chains: String(chainId),
-          batchSize: '4096',
-          blockTag: 'latest',
-        })
-
-        const rpcCallRes = await fetch(
-          `${PORTAL_PROXY_URL}/v1/data/lending/user-positions/rpc-call?${params.toString()}`,
-        )
-        if (!rpcCallRes.ok) throw new Error(`RPC call endpoint: ${rpcCallRes.status}`)
-
-        const rpcCallData: RpcCallResponse = await rpcCallRes.json()
-        if (!rpcCallData.success) throw new Error('Failed to get RPC call spec')
-
-        const { rpcCallId, rpcCalls } = rpcCallData.data
-
-        // Step 2: Execute on-chain with retry across multiple RPCs
-        const rawResponses = await rpcCallWithRetry(chainId!, rpcCalls)
-
-        // Step 3: Parse results
-        const parseRes = await fetch(
-          `${PORTAL_PROXY_URL}/v1/data/lending/user-positions/parse`,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ rpcCallId, rawResponses }),
-          },
-        )
-        if (!parseRes.ok) throw new Error(`Parse endpoint: ${parseRes.status}`)
-
-        const parsed: ParseResponse = await parseRes.json()
-        if (!parsed.success || !parsed.data) {
-          throw new Error(parsed.error?.message ?? 'Failed to parse positions')
-        }
-
-        if (!cancelled) setPositions(parsed.data.items)
-      } catch (e) {
+    fetchUserDataViaRpc(String(chainId), account)
+      .then(result => {
+        if (!cancelled) setPositions(result.data)
+      })
+      .catch(e => {
         if (!cancelled) setError(e instanceof Error ? e.message : String(e))
-      } finally {
+      })
+      .finally(() => {
         if (!cancelled) setLoading(false)
-      }
-    }
+      })
 
-    void fetchPositions()
-    return () => { cancelled = true }
+    return () => {
+      cancelled = true
+    }
   }, [account, chainId, tick])
 
-  return { positions, loading, error, refetch }
+  const visiblePositions = account && chainId ? positions : []
+
+  return { positions: visiblePositions, loading, error, refetch }
 }
