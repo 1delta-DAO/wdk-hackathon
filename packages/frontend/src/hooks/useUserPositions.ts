@@ -199,7 +199,7 @@ export function useUserPositions(
         // Step 1: Get RPC call specs (no lender filter = all lenders)
         const params = new URLSearchParams({
           account: account!,
-          chain: String(chainId),
+          chains: String(chainId),
           batchSize: '4096',
           blockTag: 'latest',
         })
